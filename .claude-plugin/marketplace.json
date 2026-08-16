@@ -1,0 +1,15 @@
+{
+  "name": "ccalyze",
+  "description": "ccalyze — Claude Code usage analyzer plugin (skill + optional CLI)",
+  "owner": {
+    "name": "Optibus",
+    "url": "https://github.com/Optibus"
+  },
+  "plugins": [
+    {
+      "name": "ccalyze",
+      "source": "./",
+      "description": "Claude Code usage analyzer — costs, cache efficiency, anomalies, and cost-aware behavioral insights from your local ~/.claude/ data"
+    }
+  ]
+}

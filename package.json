@@ -1,0 +1,31 @@
+{
+  "name": "ccalyze",
+  "version": "0.4.0",
+  "description": "Claude Code usage analyzer \u2014 costs, anomalies, and optimization tips",
+  "type": "module",
+  "bin": {
+    "ccalyze": "./build/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "node --test --experimental-strip-types src/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.test.json",
+    "verify": "npm run typecheck && npm run typecheck:tests && npm test",
+    "bundle-skill": "node scripts/bundle-skill.mjs"
+  },
+  "keywords": [
+    "claude-code",
+    "usage",
+    "analytics"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "ccalyze",
+  "version": "0.4.0",
+  "description": "Claude Code usage analyzer — costs, cache efficiency, anomalies, and cost-aware behavioral insights from your local ~/.claude/ data",
+  "author": {
+    "name": "Optibus",
+    "url": "https://github.com/Optibus/ccalyze"
+  },
+  "homepage": "https://github.com/Optibus/ccalyze",
+  "repository": "https://github.com/Optibus/ccalyze",
+  "license": "MIT",
+  "keywords": ["claude-code", "usage", "analytics", "cost", "cache", "insights"]
+}

@@ -1,0 +1,13 @@
+{
+  // Type-checks the test files, which the build config deliberately excludes.
+  //
+  // `npm test` runs Node with --experimental-strip-types, which ERASES types without
+  // checking them — so a type-invalid test still passes. Without this config nothing
+  // ever type-checked src/**/*.test.ts.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}
