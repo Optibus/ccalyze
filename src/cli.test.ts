@@ -131,6 +131,19 @@ describe('parseArgs — habits report options', () => {
     assert.throws(() => parseArgs(['--habits', '--unit']), /--unit needs a value/);
   });
 
+  it('refuses an unknown flag instead of dropping it', () => {
+    // A dropped flag is silent in the direction that matters: the person believes
+    // they redacted their project labels and ships directory names.
+    assert.throws(
+      () => parseArgs(['--habits', '--redact-project']),
+      /unknown option --redact-project/,
+    );
+  });
+
+  it('refuses a mistyped value-flag rather than reading its value as the length', () => {
+    assert.throws(() => parseArgs(['--habits', '--topp', '2']), /unknown option --topp/);
+  });
+
   it('does not read a flag value as the window length', () => {
     const args = parseArgs(['--habits', '--unit', '30d']);
     assert.equal(args.unit, '30d');

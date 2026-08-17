@@ -352,6 +352,24 @@ describe('scorecard', () => {
     assert.ok(rows.every((row) => row.prior === null));
   });
 
+  it('reads a rise off a zero baseline as worse, and zero-to-zero as flat', () => {
+    const withCold = (extra: number, range: DateRange) =>
+      summarizeWindow(
+        output({ range, sessions: [session({ costUSD: 100, prompts: 100, coldStartExtraUSD: extra })] }),
+      );
+    const measure = 'Cold-start premium, share of total';
+    assert.equal(
+      scorecard(withCold(5, current), withCold(0, prior)).find((r) => r.measure === measure)!
+        .verdict,
+      'worse',
+    );
+    assert.equal(
+      scorecard(withCold(0, current), withCold(0, prior)).find((r) => r.measure === measure)!
+        .verdict,
+      'flat',
+    );
+  });
+
   it('treats a rising cache-read share as better, not worse', () => {
     const row = scorecard(
       summarizeWindow(output({ range: current, cacheReadRatio: 0.98 })),
@@ -384,6 +402,30 @@ describe('headline', () => {
 
   it('says habits cannot be tracked from one window', () => {
     assert.equal(headline(window(100, 100, cur), null).finding, 'single-window');
+  });
+
+  it('holds the volume branch at its exact thresholds', () => {
+    // 10% more prompts is not yet "more work" — the branch needs > 10.
+    assert.equal(headline(window(110, 110, cur), window(100, 100, pri)).finding, 'mixed');
+    // 11% more prompts at exactly +2% per-prompt is: the boundary is inclusive.
+    assert.equal(headline(window(113.22, 111, cur), window(100, 100, pri)).finding, 'volume');
+  });
+
+  it('holds the regression branch at its exact threshold', () => {
+    // Exactly +5% per-prompt is not yet a habit; the branch needs > 5.
+    assert.equal(headline(window(105, 100, cur), window(100, 100, pri)).finding, 'mixed');
+    assert.equal(
+      headline(window(106, 100, cur), window(100, 100, pri)).finding,
+      'efficiency-regression',
+    );
+  });
+
+  it('says n/a rather than "null%" when a window ran no prompts', () => {
+    const empty = summarizeWindow(output({ range: cur, sessions: [] }));
+    const found = headline(empty, window(100, 100, pri));
+    assert.equal(found.finding, 'mixed');
+    assert.doesNotMatch(found.why, /null/);
+    assert.match(found.why, /per-prompt n\/a/);
   });
 });
 
@@ -490,6 +532,17 @@ describe('validateWindowPair', () => {
     );
   });
 
+  it('refuses two entirely empty windows, which the asymmetry check cannot see', () => {
+    assert.throws(
+      () =>
+        validateWindowPair(
+          window({ from: '2026-08-10', to: '2026-08-16' }, 0),
+          window({ from: '2026-08-03', to: '2026-08-09' }, 0),
+        ),
+      /window too sparse/,
+    );
+  });
+
   it('refuses a pair where both windows are equally empty', () => {
     assert.throws(
       () =>
@@ -561,6 +614,36 @@ describe('buildHabitsReport', () => {
       report.prior!.byProject.map((row) => row.project),
       ['project-1'],
     );
+  });
+
+  it('lets --single-window through a coverage floor that would refuse a pair', () => {
+    // Deliberate: the floors exist to stop a nearly-empty PRIOR window from
+    // producing a false delta. With no prior there is no delta to falsify, and
+    // this mode exists precisely for a history too short to pair.
+    const { report } = buildHabitsReport(
+      output({ range: { from: '2026-07-18', to: '2026-08-16' }, daysCovered: 2 }),
+      null,
+    );
+    assert.equal(report.headline.finding, 'single-window');
+  });
+
+  it('redacts over an alias when both are asked for', () => {
+    const { report } = buildHabitsReport(
+      output({ range: current, byProject: [project('acme-migration', 10, 10)] }),
+      null,
+      { redactProjects: true, aliases: { 'acme-migration': 'customer-a' } },
+    );
+    assert.equal(report.current.byProject[0].project, 'project-1');
+  });
+
+  it('leaves a project named after an Object prototype key alone', () => {
+    const { report } = buildHabitsReport(
+      output({ range: current, byProject: [project('constructor', 10, 10)] }),
+      null,
+      { aliases: {} },
+    );
+    assert.equal(report.current.byProject[0].project, 'constructor');
+    assert.match(JSON.stringify(report.current.byProject[0]), /"project":"constructor"/);
   });
 
   it('refuses rather than reporting a pair it cannot compare', () => {

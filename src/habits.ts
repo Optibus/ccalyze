@@ -300,12 +300,22 @@ export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = 
   };
 }
 
-/** Rename or redact project labels in place. They are directory names. */
+/**
+ * Rename or redact project labels in place. They are directory names, so they
+ * routinely carry a customer name, a person's name, or a private side project.
+ *
+ * Redaction wins over an alias when both are asked for: the stricter of two
+ * sharing rules is the safe one to resolve to.
+ *
+ * The lookup is `hasOwn`, not `in`: a project directory called `constructor` or
+ * `toString` would otherwise match an *empty* alias map and be overwritten by the
+ * inherited function, which `JSON.stringify` then drops from the row entirely.
+ */
 function relabelProjects(window: HabitsWindow, options: HabitsOptions): void {
   window.byProject.forEach((project, index) => {
     if (options.redactProjects) {
       project.project = `project-${index + 1}`;
-    } else if (options.aliases && project.project in options.aliases) {
+    } else if (options.aliases && Object.hasOwn(options.aliases, project.project)) {
       project.project = options.aliases[project.project];
     }
   });
@@ -437,11 +447,14 @@ export function headline(current: HabitsWindow, prior: HabitsWindow | null): Hab
         'which points at a habit rather than workload.',
     };
   }
+  // A window with no prompts leaves a delta undefined rather than zero; say so
+  // instead of printing "per-prompt null%".
+  const show = (value: number | null) => (value === null ? 'n/a' : `${value}%`);
   return {
     finding: 'mixed',
     why:
-      `Consumption ${dc}%, prompts ${dp}%, per-prompt ${dpp}% — no single ` +
-      'explanation dominates; read the scorecard.',
+      `Consumption ${show(dc)}, prompts ${show(dp)}, per-prompt ${show(dpp)} — ` +
+      'no single explanation dominates; read the scorecard.',
   };
 }
 

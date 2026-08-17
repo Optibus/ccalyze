@@ -95,7 +95,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const eq = read.value.indexOf('=');
       if (eq < 1) throw new Error(`--alias needs OLD=NEW, got ${read.value}`);
       aliases[read.value.slice(0, eq)] = read.value.slice(eq + 1);
-    } else if (!arg.startsWith('--')) positional.push(arg);
+    } else if (arg.startsWith('--')) {
+      // Refused, never ignored. A dropped flag is silent in both directions: the
+      // person believes `--redact-project` (singular typo) redacted their project
+      // labels and shares directory names, and the flag's *value* survives as a
+      // positional, so `--topp 2` reads as a 2-day window instead of the default 7.
+      throw new Error(`unknown option ${name}`);
+    } else positional.push(arg);
   }
 
   const habitsLength = resolveHabitsLength(positional, flags.habits);
@@ -190,8 +196,13 @@ export async function analyzeRange(
 ): Promise<CcalyzeOutput> {
   const from = new Date(range.from);
   const to = new Date(range.to);
+  // A UTC step, because `new Date('2026-08-10')` parses as UTC midnight. Stepping
+  // the *local* day across a DST transition makes the last day 23h or 25h long —
+  // harmless in a single-window run, but it would make one --habits window
+  // physically shorter than the other while both still span N dates, which is
+  // exactly the error validateWindowPair exists to refuse and cannot see.
   const toEnd = new Date(to);
-  toEnd.setDate(toEnd.getDate() + 1);
+  toEnd.setUTCDate(toEnd.getUTCDate() + 1);
 
   // Parse history
   const historyPath = resolve(claudeDir, 'history.jsonl');

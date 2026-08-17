@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { VERSION } from './version.ts';
 
 describe('VERSION', () => {
@@ -41,6 +45,39 @@ describe('committed skill bundle (skills/ccalyze/)', () => {
     const source = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8');
     const bundled = readFileSync(new URL('../skills/ccalyze/SKILL.md', import.meta.url), 'utf8');
     assert.equal(bundled, source);
+  });
+
+  it('ships JS compiled from the current src/', () => {
+    // The version and SKILL.md checks above only catch a bundle left behind by a
+    // *version bump* or a doc edit. A fix landed in src/ at an unchanged version
+    // is the dangerous case: verify stays green while every plugin install keeps
+    // running the old code — and the bundle, not build/, is what users execute.
+    // So compile src/ fresh and compare byte for byte.
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    const bundleDir = resolve(root, 'skills', 'ccalyze', 'bin');
+    const fresh = mkdtempSync(resolve(tmpdir(), 'ccalyze-bundle-check-'));
+    try {
+      execFileSync('node', [resolve(root, 'node_modules/typescript/bin/tsc'), '--outDir', fresh], {
+        cwd: root,
+        stdio: 'pipe',
+      });
+      const compiled = readdirSync(fresh).filter((f) => f.endsWith('.js')).sort();
+      const bundled = readdirSync(bundleDir).filter((f) => f.endsWith('.js')).sort();
+      assert.deepEqual(
+        bundled,
+        compiled,
+        'skills/ccalyze/bin/ holds a different set of files than a fresh compile — re-run `npm run bundle-skill`',
+      );
+      for (const file of compiled) {
+        assert.equal(
+          readFileSync(resolve(bundleDir, file), 'utf8'),
+          readFileSync(resolve(fresh, file), 'utf8'),
+          `skills/ccalyze/bin/${file} is stale — re-run \`npm run bundle-skill\` and commit it`,
+        );
+      }
+    } finally {
+      rmSync(fresh, { recursive: true, force: true });
+    }
   });
 
   it('ships cli.js with the exec bit set', () => {
