@@ -311,6 +311,10 @@ export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = 
       sessions.filter((s) => s.flags.includes('no-compaction')).length,
       sessions.length,
     ),
+    autoCompactionShare: pct(
+      sessions.filter((s) => s.compaction === 'auto').length,
+      sessions.length,
+    ),
     longRunningSessions: sessions.filter((s) => s.flags.includes('long-running')).length,
     top3Share: pct(top3, cost),
     offHoursShare: pct(offHoursCost, cost),
@@ -434,6 +438,7 @@ export function scorecard(
     row('Cache-read share of input tokens', (w) => w.cacheReadShare, false),
     row('Subagent delegation, share of input tokens', (w) => w.subagentTokenShare, false),
     row('Sessions with no /compact (share)', (w) => w.noCompactionShare),
+    row('Sessions auto-compacted, hit the wall (share)', (w) => w.autoCompactionShare),
     row('Share in sessions carrying a behavioural flag', (w) => w.flagged.costShare),
     row(
       'Most-expensive-model share of consumption',
@@ -629,6 +634,11 @@ export function buildHabitsReport(
       byDayIsStartDated:
         "A session's whole consumption is stamped on the date it started, so " +
         'per-day figures are not daily effort.',
+      autoCompactionNeedsRecentTranscripts:
+        'Auto-compaction is only detectable on transcripts new enough to carry the field ' +
+        'Claude Code stamps on the synthetic continuation message — older ones read as ' +
+        "0, same as a session that never filled up. A session that hit the wall isn't " +
+        'unmanaged: read this alongside, not instead of, no-compact share.',
       offHoursIsLocalClock:
         'Off-hours reads the local clock of the machine that ran ccalyze, because the ' +
         'transcript stores no time zone at all — only honest when that machine and time ' +

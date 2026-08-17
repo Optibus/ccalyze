@@ -319,10 +319,22 @@ export function aggregate(
     const endMs = new Date(session.endTime).getTime();
     const durationMinutes = Math.round((endMs - startMs) / 60_000);
 
+    // Which kind of compaction this session saw, if any. Manual (a /compact
+    // entry in history.jsonl) wins over auto (Claude Code compacted on its
+    // own after context filled up) because it was a choice.
+    const autoCompactions = session.autoCompactions ?? 0;
+    const compaction: SessionSummary['compaction'] = compactedSessions.has(session.sessionId)
+      ? 'manual'
+      : autoCompactions > 0
+        ? 'auto'
+        : 'none';
+
     // Assign flags
     const flags: SessionFlag[] = [];
 
-    if (session.promptCount >= 30 && !compactedSessions.has(session.sessionId)) {
+    // A session that auto-compacted was NOT left unmanaged — it hit Claude
+    // Code's own wall. Only 'none' means nothing about context ever happened.
+    if (session.promptCount >= 30 && compaction === 'none') {
       flags.push('no-compaction');
     }
     if (durationMinutes > 180) {
@@ -355,6 +367,8 @@ export function aggregate(
       ),
       coldStarts: coldStarts.count,
       coldStartExtraUSD: coldStarts.extraUSD,
+      compaction,
+      autoCompactions,
     });
   }
 

@@ -41,6 +41,8 @@ interface SessionSpec {
   flags?: SessionFlag[];
   coldStartExtraUSD?: number;
   startTime?: string;
+  compaction?: SessionSummary['compaction'];
+  autoCompactions?: number;
 }
 
 function session(spec: SessionSpec = {}): SessionSummary {
@@ -61,6 +63,8 @@ function session(spec: SessionSpec = {}): SessionSummary {
     cacheReadRatio: 0.95,
     coldStarts: spec.coldStartExtraUSD ? 1 : 0,
     coldStartExtraUSD: spec.coldStartExtraUSD ?? 0,
+    compaction: spec.compaction ?? 'none',
+    autoCompactions: spec.autoCompactions ?? 0,
   };
 }
 
@@ -354,6 +358,20 @@ describe('summarizeWindow', () => {
   it('surfaces the subagent token share from the run summary, as a percentage', () => {
     const window = summarizeWindow(output({ sidechainTokenShare: 0.42 }));
     assert.equal(window.subagentTokenShare, 42);
+  });
+
+  it('shares sessions that hit the auto-compact wall, separately from no-compact', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', compaction: 'auto' }),
+          session({ id: 'b', compaction: 'manual' }),
+          session({ id: 'c', compaction: 'none', flags: ['no-compaction'] }),
+          session({ id: 'd', compaction: 'none' }),
+        ],
+      }),
+    );
+    assert.equal(window.autoCompactionShare, 25);
   });
 });
 

@@ -133,6 +133,19 @@ export interface SessionSummary {
    * rebuild.
    */
   coldStartExtraUSD: number;
+  /**
+   * Which kind of context compaction this session saw, if any: `manual` (a
+   * `/compact` entry in history.jsonl) beats `auto` (Claude Code compacted on
+   * its own after context filled up) beats `none`. A session could in theory
+   * see both; manual wins because it was a choice.
+   */
+  compaction: 'manual' | 'auto' | 'none';
+  /**
+   * Times this session auto-compacted. Zero on transcripts old enough to
+   * predate the field Claude Code stamps on the synthetic continuation
+   * message — reads as `none` above, same as a session that never filled up.
+   */
+  autoCompactions: number;
 }
 
 export interface CcalyzeOutput {
@@ -313,6 +326,13 @@ export interface HabitsWindow {
     sessions: number;
   };
   noCompactionShare: number;
+  /**
+   * Share of sessions that hit the auto-compact wall (`compaction === 'auto'`)
+   * rather than choosing to `/compact`. Hitting the wall means context ran out
+   * before the person acted on it — a friction signal `/compact`-share cannot
+   * see, since both currently read as "compacted".
+   */
+  autoCompactionShare: number;
   longRunningSessions: number;
   /** Share of the window's cost carried by its three priciest sessions. */
   top3Share: number;

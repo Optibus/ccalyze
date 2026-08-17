@@ -120,6 +120,31 @@ describe('parseSessionFile', () => {
     const byId = Object.fromEntries(result.messages.map((m) => [m.requestId, m.isSidechain]));
     assert.deepEqual(byId, { main: false, sub: true, 'explicit-main': false });
   });
+
+  it('counts an auto-compact continuation message, and does not count it as a prompt', async () => {
+    // Claude Code injects this synthetic type:"user" message when context
+    // fills up mid-session — it is not something the person typed.
+    const sessionFile = path.join(TMP, 'auto-compact.jsonl');
+    fs.writeFileSync(sessionFile, [
+      JSON.stringify({ type: 'user', sessionId: 's', timestamp: '2026-03-29T11:00:00Z', message: { role: 'user', content: 'real prompt' } }),
+      JSON.stringify({ type: 'user', sessionId: 's', timestamp: '2026-03-29T11:05:00Z', isCompactSummary: true, compactMetadata: {}, message: { role: 'user', content: 'This session is being continued...' } }),
+      JSON.stringify({ type: 'user', sessionId: 's', timestamp: '2026-03-29T11:06:00Z', message: { role: 'user', content: 'another real prompt' } }),
+    ].join('\n') + '\n');
+
+    const result = await parseSessionFile(sessionFile);
+    assert.equal(result.promptCount, 2, 'the synthetic continuation message must not count as a prompt');
+    assert.equal(result.autoCompactions, 1);
+  });
+
+  it('reads autoCompactions as 0 on a transcript that never auto-compacted', async () => {
+    const sessionFile = path.join(TMP, 'no-auto-compact.jsonl');
+    fs.writeFileSync(sessionFile, JSON.stringify({
+      type: 'user', sessionId: 's', timestamp: '2026-03-29T11:00:00Z', message: { role: 'user', content: 'hi' },
+    }) + '\n');
+
+    const result = await parseSessionFile(sessionFile);
+    assert.equal(result.autoCompactions, 0);
+  });
 });
 
 describe('parseHistoryFile', () => {

@@ -29,6 +29,8 @@ function session(over: Partial<SessionSummary> = {}): SessionSummary {
     cacheReadRatio: 0.96,
     coldStarts: 0,
     coldStartExtraUSD: 0,
+    compaction: 'none',
+    autoCompactions: 0,
     ...over,
   };
 }

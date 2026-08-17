@@ -146,6 +146,54 @@ describe('aggregate', () => {
   });
 });
 
+describe('aggregate — compaction', () => {
+  const range: DateRange = { from: '2026-03-29', to: '2026-03-29' };
+
+  function longSession(over: Partial<SessionParseResult & { project: string; transcriptSizeMB: number }> = {}) {
+    return {
+      sessionId: 'sess-a',
+      project: 'proj',
+      startTime: '2026-03-29T10:00:00Z',
+      endTime: '2026-03-29T11:00:00Z',
+      transcriptSizeMB: 1,
+      promptCount: 40, // over the 30-prompt no-compaction floor
+      messages: [],
+      ...over,
+    };
+  }
+
+  it('classifies manual over auto when a session has both', () => {
+    const history: HistoryEntry[] = [
+      { display: '/compact', timestamp: Date.parse('2026-03-29T10:30:00Z'), project: 'p', sessionId: 'sess-a' },
+    ];
+    const result = aggregate([longSession({ autoCompactions: 2 })], history, range);
+    assert.equal(result.sessions[0].compaction, 'manual');
+    assert.equal(result.sessions[0].autoCompactions, 2);
+  });
+
+  it('classifies auto when only the wall was hit, and does not flag no-compaction', () => {
+    const result = aggregate([longSession({ autoCompactions: 1 })], [], range);
+    assert.equal(result.sessions[0].compaction, 'auto');
+    assert.ok(
+      !result.sessions[0].flags.includes('no-compaction'),
+      'a session that hit the auto-compact wall was not left unmanaged',
+    );
+  });
+
+  it('classifies none, and still flags no-compaction, when neither happened', () => {
+    const result = aggregate([longSession()], [], range);
+    assert.equal(result.sessions[0].compaction, 'none');
+    assert.ok(result.sessions[0].flags.includes('no-compaction'));
+  });
+
+  it('reads autoCompactions as 0 when the parser omits it (older transcripts)', () => {
+    const { autoCompactions, ...withoutField } = longSession();
+    const result = aggregate([withoutField], [], range);
+    assert.equal(result.sessions[0].autoCompactions, 0);
+    assert.equal(result.sessions[0].compaction, 'none');
+  });
+});
+
 describe('buildDeepData', () => {
   const range: DateRange = { from: '2026-03-29', to: '2026-03-29' };
 
@@ -178,6 +226,8 @@ describe('buildDeepData', () => {
       cacheReadRatio: 0.96,
       coldStarts: 0,
       coldStartExtraUSD: 0,
+      compaction: 'none',
+      autoCompactions: 0,
       ...over,
     };
   }

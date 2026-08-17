@@ -8,6 +8,14 @@ export interface SessionParseResult {
   endTime: string;
   messages: ParsedMessage[];
   promptCount: number;
+  /**
+   * Times Claude Code auto-compacted this session (a synthetic `type:"user"`
+   * message carrying `isCompactSummary:true`, injected when context filled up
+   * — distinct from a person typing `/compact`, which lives in history.jsonl
+   * instead). Optional because it is absent on transcripts old enough to
+   * predate the field, which reads as zero.
+   */
+  autoCompactions?: number;
 }
 
 export async function parseSessionFile(filePath: string): Promise<SessionParseResult> {
@@ -16,6 +24,7 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
   let startTime = '';
   let endTime = '';
   let promptCount = 0;
+  let autoCompactions = 0;
 
   const rl = createInterface({
     input: createReadStream(filePath),
@@ -43,9 +52,14 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
       if (!endTime || ts > endTime) endTime = ts;
     }
 
-    // Count user prompts
+    // Count user prompts — except the synthetic continuation message an
+    // auto-compact injects, which is not something the person typed.
     if (obj.type === 'user') {
-      promptCount++;
+      if (obj.isCompactSummary === true) {
+        autoCompactions++;
+      } else {
+        promptCount++;
+      }
     }
 
     // Extract usage from assistant messages
@@ -91,6 +105,7 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
     endTime,
     messages: Array.from(byRequest.values()),
     promptCount,
+    autoCompactions,
   };
 }
 
