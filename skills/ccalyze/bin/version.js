@@ -8,5 +8,5 @@
  *
  * Kept in sync with package.json by a test.
  */
-export const VERSION = '0.4.1';
+export const VERSION = '0.5.0';
 //# sourceMappingURL=version.js.map
