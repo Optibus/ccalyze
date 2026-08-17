@@ -298,6 +298,13 @@ export interface HabitsWindow {
   perPrompt: number | null;
   /** `summary.cacheReadRatio` as a percentage, 0-100. */
   cacheReadShare: number;
+  /**
+   * `summary.sidechainTokenShare` as a percentage, 0-100 — share of input-side
+   * tokens spent inside subagents. Read as delegation, not friction: those
+   * tokens are read once in a clean context and never rejoin the window that
+   * gets resent on every later turn, so a rising share is the good direction.
+   */
+  subagentTokenShare: number;
   coldStart: {
     /** Summed `coldStartExtraUSD` — the avoidable premium, not the whole rebuild. */
     extra: number;
@@ -309,6 +316,16 @@ export interface HabitsWindow {
   longRunningSessions: number;
   /** Share of the window's cost carried by its three priciest sessions. */
   top3Share: number;
+  /**
+   * Share of the window's cost carried by sessions that *started* at night
+   * (local clock, before 08:00 or at/after 20:00) or on a Saturday/Sunday.
+   *
+   * Read off `SessionSummary.startTime` in the analysis machine's own local
+   * time zone — the only "local" a stored UTC timestamp can honestly recover,
+   * since Claude Code transcripts carry no time-zone field. That only holds
+   * if ccalyze runs on the same device/time zone the work happened in.
+   */
+  offHoursShare: number;
   flagged: HabitsCohort;
   clean: HabitsCohort;
   /**

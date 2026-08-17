@@ -67,6 +67,12 @@ export const COVERAGE_SPARSITY_FLOOR = 0.35;
 /** Relative move below which a scorecard row reads `flat` rather than a direction. */
 export const NOISE_FLOOR = 0.05;
 
+/** Local hour at/after which a session's start reads as night, until {@link OFF_HOURS_END}. */
+export const OFF_HOURS_START = 20;
+
+/** Local hour before which a session's start still reads as night. */
+export const OFF_HOURS_END = 8;
+
 /** Relative move at or above which a row reads `much better` rather than `better`. */
 export const STRONG_MOVE = 0.25;
 
@@ -126,6 +132,22 @@ export function ratioDelta(next: number | null, prev: number | null): number | n
 
 function behavioural(session: SessionSummary): boolean {
   return session.flags.some((flag) => BEHAVIOURAL_FLAGS.has(flag));
+}
+
+/**
+ * A session's start reads as off-hours when it lands at night or on a
+ * weekend, by the clock of whatever machine parses `startTime`.
+ *
+ * There is no time-zone field in a Claude Code transcript — only a UTC
+ * timestamp — so "local" here can only ever mean "local to the machine
+ * running ccalyze right now". That is honest only when it is the same
+ * device/time zone the work happened in, which is the caveat this ships with.
+ */
+function isOffHours(session: SessionSummary): boolean {
+  const start = new Date(session.startTime);
+  const hour = start.getHours();
+  const day = start.getDay(); // 0 = Sunday, 6 = Saturday
+  return hour >= OFF_HOURS_START || hour < OFF_HOURS_END || day === 0 || day === 6;
 }
 
 /** Days as a whole number between two `YYYY-MM-DD` dates. Both UTC, so exact. */
@@ -264,6 +286,8 @@ export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = 
     .slice(0, 3)
     .reduce((sum, row) => sum + row.costUSD, 0);
 
+  const offHoursCost = sessions.filter(isOffHours).reduce((sum, row) => sum + row.costUSD, 0);
+
   const coldExtra = sessions.reduce((sum, row) => sum + (row.coldStartExtraUSD || 0), 0);
   const anomalyCounts = countAnomalies(output.anomalies);
   const cleanPrompts = clean.reduce((sum, row) => sum + row.prompts, 0);
@@ -277,6 +301,7 @@ export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = 
     sessions: output.summary.totalSessions,
     perPrompt: prompts ? round(cost / prompts, 4) : null,
     cacheReadShare: round(100 * output.summary.cacheReadRatio, 1),
+    subagentTokenShare: round(100 * output.summary.sidechainTokenShare, 1),
     coldStart: {
       extra: round(coldExtra, 2),
       share: pct(coldExtra, cost),
@@ -288,6 +313,7 @@ export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = 
     ),
     longRunningSessions: sessions.filter((s) => s.flags.includes('long-running')).length,
     top3Share: pct(top3, cost),
+    offHoursShare: pct(offHoursCost, cost),
     flagged: cohort(flagged),
     clean: cohort(clean),
     cleanCohortUsable: prompts ? cleanPrompts / prompts >= COHORT_FLOOR : false,
@@ -404,7 +430,9 @@ export function scorecard(
     row('Sessions resumed cold after an idle gap', (w) => w.coldStart.sessions),
     row('Share carried by sessions over 24 h', over24hShare),
     row('Top-three session concentration', (w) => w.top3Share),
+    row('Off-hours share (nights + weekends)', (w) => w.offHoursShare),
     row('Cache-read share of input tokens', (w) => w.cacheReadShare, false),
+    row('Subagent delegation, share of input tokens', (w) => w.subagentTokenShare, false),
     row('Sessions with no /compact (share)', (w) => w.noCompactionShare),
     row('Share in sessions carrying a behavioural flag', (w) => w.flagged.costShare),
     row(
@@ -601,6 +629,11 @@ export function buildHabitsReport(
       byDayIsStartDated:
         "A session's whole consumption is stamped on the date it started, so " +
         'per-day figures are not daily effort.',
+      offHoursIsLocalClock:
+        'Off-hours reads the local clock of the machine that ran ccalyze, because the ' +
+        'transcript stores no time zone at all — only honest when that machine and time ' +
+        "zone match where the work actually happened. Rising night/weekend share is a " +
+        'burnout signal, not a cost one; read it on its own, not folded into the headline.',
       cleanCohort:
         `Unflagged sessions hold ${current.clean.promptShare}% of prompts` +
         (current.cleanCohortUsable
