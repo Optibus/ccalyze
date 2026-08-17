@@ -146,6 +146,13 @@ export interface SessionSummary {
    * message — reads as `none` above, same as a session that never filled up.
    */
   autoCompactions: number;
+  /**
+   * Extra edits to a file this session already edited — `Edit`/`Write`/
+   * `MultiEdit` tool calls beyond the first per file. Not a judgement on its
+   * own: plenty of iteration is normal. A session with a lot is worth reading
+   * for whether it was iterating or thrashing.
+   */
+  reworkEdits: number;
 }
 
 export interface CcalyzeOutput {
@@ -333,6 +340,13 @@ export interface HabitsWindow {
    * see, since both currently read as "compacted".
    */
   autoCompactionShare: number;
+  /**
+   * Share of sessions with at least one repeated same-file edit
+   * (`reworkEdits > 0`). Not a judgement of the level — plenty of legitimate
+   * iteration looks the same — but a rising share across two windows is worth
+   * reading as friction.
+   */
+  reworkShare: number;
   longRunningSessions: number;
   /** Share of the window's cost carried by its three priciest sessions. */
   top3Share: number;
@@ -440,6 +454,11 @@ export interface ParsedMessage {
    * Absent in older transcripts, in which case it reads as false.
    */
   isSidechain: boolean;
+  /**
+   * File paths this message's `Edit`/`Write`/`MultiEdit` tool_use blocks
+   * touched, for rework tracking. Empty when it made no such calls.
+   */
+  editedFiles: string[];
 }
 
 export interface HistoryEntry {

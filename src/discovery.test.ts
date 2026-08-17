@@ -64,6 +64,7 @@ describe('mergeSessions', () => {
       model: 'claude-opus-4-6',
       timestamp: '2026-03-29T10:00:00Z',
       isSidechain: false,
+      editedFiles: [],
       usage: {
         input_tokens: 100,
         output_tokens: 200,

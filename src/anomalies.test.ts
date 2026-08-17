@@ -31,6 +31,7 @@ function session(over: Partial<SessionSummary> = {}): SessionSummary {
     coldStartExtraUSD: 0,
     compaction: 'none',
     autoCompactions: 0,
+    reworkEdits: 0,
     ...over,
   };
 }

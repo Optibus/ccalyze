@@ -49,6 +49,7 @@ describe('types', () => {
         coldStartExtraUSD: 3.21,
         compaction: 'none',
         autoCompactions: 0,
+        reworkEdits: 0,
       }],
       anomalies: [{
         type: 'cost_spike',

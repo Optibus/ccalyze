@@ -199,7 +199,14 @@ export function aggregate(
     // Per-message cost accumulation; also track per-model token usage for byDay
     const modelTokensInSession = new Map<string, { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }>();
 
+    // File path -> edit count, for rework tracking.
+    const fileEditCounts = new Map<string, number>();
+
     for (const msg of session.messages) {
+      for (const file of msg.editedFiles) {
+        fileEditCounts.set(file, (fileEditCounts.get(file) ?? 0) + 1);
+      }
+
       const cost = computeCost(msg.model, msg.usage);
       sessionCost += cost;
       sessionInputTokens += msg.usage.input_tokens;
@@ -349,6 +356,12 @@ export function aggregate(
 
     const coldStarts = computeColdStarts(session.messages);
 
+    // Extra edits beyond the first per file — the first edit is normal work.
+    let reworkEdits = 0;
+    for (const count of fileEditCounts.values()) {
+      if (count > 1) reworkEdits += count - 1;
+    }
+
     sessionSummaries.push({
       id: session.sessionId,
       name: sessionNames.get(session.sessionId) ?? '',
@@ -369,6 +382,7 @@ export function aggregate(
       coldStartExtraUSD: coldStarts.extraUSD,
       compaction,
       autoCompactions,
+      reworkEdits,
     });
   }
 

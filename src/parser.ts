@@ -2,6 +2,25 @@ import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import type { ParsedMessage, HistoryEntry, RawUsage } from './types.ts';
 
+/** Tool names whose `input.file_path` counts as an edit, for rework tracking. */
+const EDIT_TOOL_NAMES = new Set(['Edit', 'Write', 'MultiEdit']);
+
+/** File paths edited by `Edit`/`Write`/`MultiEdit` tool_use blocks in a message's content. */
+function extractEditedFiles(content: unknown): string[] {
+  if (!Array.isArray(content)) return [];
+  const files: string[] = [];
+  for (const block of content) {
+    if (
+      block?.type === 'tool_use' &&
+      EDIT_TOOL_NAMES.has(block.name) &&
+      typeof block.input?.file_path === 'string'
+    ) {
+      files.push(block.input.file_path);
+    }
+  }
+  return files;
+}
+
 export interface SessionParseResult {
   sessionId: string;
   startTime: string;
@@ -76,6 +95,8 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
       cache_read_input_tokens: message.usage.cache_read_input_tokens ?? 0,
     };
 
+    const editedFiles = extractEditedFiles(message.content);
+
     const existing = byRequest.get(requestId);
     if (existing) {
       // Take max of each field (streaming sends incremental updates)
@@ -85,6 +106,10 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
       existing.usage.cache_read_input_tokens = Math.max(existing.usage.cache_read_input_tokens, usage.cache_read_input_tokens);
       // Keep later timestamp
       if (ts && ts > existing.timestamp) existing.timestamp = ts;
+      // A streaming update's content is cumulative — only overwrite once it is
+      // non-empty, so an earlier, fuller update is never clobbered by a later
+      // partial one that has not caught up yet.
+      if (editedFiles.length) existing.editedFiles = editedFiles;
     } else {
       byRequest.set(requestId, {
         requestId,
@@ -95,6 +120,7 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
         // Subagent transcripts live in their own files and mark every entry;
         // older transcripts omit the field entirely, which reads as main-thread.
         isSidechain: obj.isSidechain === true,
+        editedFiles,
       });
     }
   }

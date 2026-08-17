@@ -315,6 +315,10 @@ export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = 
       sessions.filter((s) => s.compaction === 'auto').length,
       sessions.length,
     ),
+    reworkShare: pct(
+      sessions.filter((s) => s.reworkEdits > 0).length,
+      sessions.length,
+    ),
     longRunningSessions: sessions.filter((s) => s.flags.includes('long-running')).length,
     top3Share: pct(top3, cost),
     offHoursShare: pct(offHoursCost, cost),
@@ -439,6 +443,7 @@ export function scorecard(
     row('Subagent delegation, share of input tokens', (w) => w.subagentTokenShare, false),
     row('Sessions with no /compact (share)', (w) => w.noCompactionShare),
     row('Sessions auto-compacted, hit the wall (share)', (w) => w.autoCompactionShare),
+    row('Sessions with repeated same-file edits (share)', (w) => w.reworkShare),
     row('Share in sessions carrying a behavioural flag', (w) => w.flagged.costShare),
     row(
       'Most-expensive-model share of consumption',
@@ -639,6 +644,10 @@ export function buildHabitsReport(
         'Claude Code stamps on the synthetic continuation message — older ones read as ' +
         "0, same as a session that never filled up. A session that hit the wall isn't " +
         'unmanaged: read this alongside, not instead of, no-compact share.',
+      reworkIsNotAJudgement:
+        'Rework only counts Edit/Write/MultiEdit tool calls that touched a file this session ' +
+        'already edited. It cannot tell deliberate iteration from thrashing — read the ' +
+        'direction across two windows, not the level in one.',
       offHoursIsLocalClock:
         'Off-hours reads the local clock of the machine that ran ccalyze, because the ' +
         'transcript stores no time zone at all — only honest when that machine and time ' +

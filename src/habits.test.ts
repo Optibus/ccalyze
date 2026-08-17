@@ -43,6 +43,7 @@ interface SessionSpec {
   startTime?: string;
   compaction?: SessionSummary['compaction'];
   autoCompactions?: number;
+  reworkEdits?: number;
 }
 
 function session(spec: SessionSpec = {}): SessionSummary {
@@ -65,6 +66,7 @@ function session(spec: SessionSpec = {}): SessionSummary {
     coldStartExtraUSD: spec.coldStartExtraUSD ?? 0,
     compaction: spec.compaction ?? 'none',
     autoCompactions: spec.autoCompactions ?? 0,
+    reworkEdits: spec.reworkEdits ?? 0,
   };
 }
 
@@ -372,6 +374,20 @@ describe('summarizeWindow', () => {
       }),
     );
     assert.equal(window.autoCompactionShare, 25);
+  });
+
+  it('shares sessions with any repeated same-file edit', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', reworkEdits: 3 }),
+          session({ id: 'b', reworkEdits: 0 }),
+          session({ id: 'c', reworkEdits: 0 }),
+          session({ id: 'd', reworkEdits: 0 }),
+        ],
+      }),
+    );
+    assert.equal(window.reworkShare, 25);
   });
 });
 
