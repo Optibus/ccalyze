@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { HABITS_DEFAULT_LENGTH, parseArgs, resolveDateRange } from './cli.ts';
+import {
+  HABITS_DEFAULT_LENGTH,
+  HABITS_HTML_DEFAULT_PATH,
+  parseArgs,
+  resolveDateRange,
+} from './cli.ts';
 
 describe('parseArgs', () => {
   it('defaults to 7d', () => {
@@ -160,6 +165,48 @@ describe('parseArgs — habits', () => {
 
   it('parses --single-window', () => {
     assert.equal(parseArgs(['--habits', '--single-window']).singleWindow, true);
+  });
+});
+
+describe('parseArgs — --html', () => {
+  it('defaults the path when the flag stands alone', () => {
+    assert.equal(parseArgs(['--habits', '--html']).htmlPath, HABITS_HTML_DEFAULT_PATH);
+  });
+
+  it('is absent unless asked for', () => {
+    assert.equal(parseArgs(['--habits']).htmlPath, undefined);
+  });
+
+  it('takes a path in either form', () => {
+    assert.equal(parseArgs(['--habits', '--html', 'report.html']).htmlPath, 'report.html');
+    assert.equal(parseArgs(['--habits', '--html=report.html']).htmlPath, 'report.html');
+    assert.equal(parseArgs(['--habits', '--html', '/tmp/out/x']).htmlPath, '/tmp/out/x');
+  });
+
+  it('does not swallow the window length as a path', () => {
+    // Silently writing the report to a file called "7d" AND analysing the default
+    // 7-day pair would be invisible in the output — the mistake this refuses.
+    assert.throws(() => parseArgs(['--habits', '--html', '7d']), /does not understand "7d" as a path/);
+  });
+
+  it('keeps the length when the flag comes after it', () => {
+    const args = parseArgs(['--habits', '15d', '--html', 'out.html']);
+    assert.equal(args.habitsLength, 15);
+    assert.equal(args.htmlPath, 'out.html');
+  });
+
+  it('leaves a following flag alone', () => {
+    const args = parseArgs(['--habits', '--html', '--redact-projects']);
+    assert.equal(args.htmlPath, HABITS_HTML_DEFAULT_PATH);
+    assert.equal(args.redactProjects, true);
+  });
+
+  it('refuses an empty --html=', () => {
+    assert.throws(() => parseArgs(['--habits', '--html=']), /--html= needs a path/);
+  });
+
+  it('refuses the flag outside --habits, where there is no report to render', () => {
+    assert.throws(() => parseArgs(['7d', '--html']), /--html renders the --habits report/);
   });
 });
 

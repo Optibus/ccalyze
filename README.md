@@ -130,6 +130,27 @@ ccalyze --habits --weekend fri,sat          # Sun-Thu work week (default is sat,
 ccalyze --habits --single-window            # first-ever run: describes habits, cannot track them
 ```
 
+### `--html`: the report as a page
+
+`--habits --html` writes the same findings as one self-contained HTML file — conclusion and
+recommendations first, then the scorecard, then the charts, then the reading notes — alongside the
+JSON, which still goes to stdout unchanged:
+
+```bash
+ccalyze --habits 7d --html                       # writes ./ccalyze-habits.html
+ccalyze --habits 7d --html ~/usage-report.html   # or a path you choose
+ccalyze --habits 7d --html > findings.json       # page on disk, JSON still pipeable
+```
+
+Nothing in the page is fetched from anywhere: no CDN, no font host, no analytics. Every number
+renders from the findings JSON embedded in the file itself, and the prose is generated from that
+same object — so a paragraph can never contradict the table beside it. Open it in a browser, or
+hand the file to Claude Code's Artifact tool to publish it as a shareable link (the CLI cannot do
+that itself — it writes files, it does not talk to claude.ai).
+
+**Check the project labels before sharing either form.** They are directory names; `--alias` and
+`--redact-projects` above apply to the page exactly as they do to the JSON.
+
 ## Optional: Terminal Visualizer
 
 Install [terminal-visualizer](https://github.com/gocodeweb/terminal-visualizer) for graphical charts in your terminal. ccalyze works without it (falls back to markdown tables).

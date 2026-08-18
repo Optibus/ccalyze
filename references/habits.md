@@ -71,6 +71,45 @@ data here, and the machine locale is not a stand-in — an `en-US` locale on an
 row files every Sunday as off-hours and misses Friday entirely, so pass
 `--weekend fri,sat`. The caveat block names whichever weekend was actually used.
 
+## Producing the report page (`--html`)
+
+Add `--html [PATH]` when the answer is going to be *read* by someone — the person themselves, a
+manager, the AI Enablement team — rather than piped into something. It writes the whole findings
+document as one self-contained HTML page, and stdout stays JSON, so both forms come out of one run:
+
+```bash
+$CC --habits 7d --html ~/usage-report.html > ~/findings.json
+```
+
+The page is generated, not composed: the conclusion paragraph, the three recommendations, the
+figure captions and the re-measure targets are all derived from the same JSON the run printed, by
+fixed rules (top lever, the rows reading `much better`, the max/min of `byDuration`/`byModel`/
+`byProject`). **Do not rewrite them, and never add a figure of your own** — every number in the
+prose is already in the JSON, which is the only reason the paragraphs cannot contradict the tables.
+Two runs on the same data produce the same page.
+
+Structure is fixed and deliberate: conclusion, recommendations, scorecard, figures, reading notes.
+Someone deciding whether to grant headroom reads the first screen and stops, so charts never come
+before the conclusion.
+
+Then publish it:
+
+1. **Read the file** before it leaves the machine, and check the project labels — they are
+   directory names. Re-run with `--alias OLD=NEW` or `--redact-projects` if any of them names a
+   customer, a person, or a private side project. Both flags apply to the page.
+2. **Publish with the Artifact tool**, passing that file path, a one-sentence `description`, and a
+   `favicon`. The page is written for exactly this: no `<!doctype>`, `<html>` or `<body>` of its
+   own, nothing loaded from another host, and it themes itself to the viewer's light/dark setting.
+3. **Send the link with one line of context** — which window, which finding, and what the person
+   is already changing. The page leads with the conclusion, which is what a reader needs.
+
+The CLI writes files; only Claude Code can publish an Artifact. That split is permanent — a
+standalone Node binary has no way to call the tool — so `--html` plus this step is the whole flow,
+and the page is complete and readable straight from disk if nobody publishes it.
+
+For a re-analysis by someone who will re-run the numbers themselves, send the JSON instead. The
+page is for reading; the JSON is for computing.
+
 ## Reading the output
 
 Check these in order. **The first that matches is the headline** — and `headline.finding` already

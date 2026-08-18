@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 import { resolve } from 'node:path';
 import { homedir } from 'node:os';
-import { statSync, existsSync } from 'node:fs';
+import { statSync, existsSync, writeFileSync } from 'node:fs';
 import { parseSessionFile, parseHistoryFile } from "./parser.js";
 import { discoverSessionFiles, mergeSessions } from "./discovery.js";
 import { aggregate } from "./aggregator.js";
 import { detectAnomalies } from "./anomalies.js";
 import { generateTips } from "./tips.js";
 import { buildHabitsReport, HabitsRefusal, parseWeekendDays, resolveHabitWindows, } from "./habits.js";
+import { renderHabitsHtml } from "./report.js";
 import { VERSION } from "./version.js";
 /** Default window length for --habits, in days. */
 export const HABITS_DEFAULT_LENGTH = 7;
+/** Where `--habits --html` writes when no path is given. */
+export const HABITS_HTML_DEFAULT_PATH = 'ccalyze-habits.html';
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * Read `--flag value` or `--flag=value`.
@@ -25,6 +28,35 @@ function readValue(argv, index, name) {
     const next = argv[index + 1];
     if (next === undefined)
         throw new Error(`${name} needs a value`);
+    return { value: next, used: 1 };
+}
+/**
+ * Read the optional path after `--html`.
+ *
+ * The value is optional, which is exactly the shape that swallows a positional:
+ * `--habits --html 7d` would otherwise write the report to a file called `7d`
+ * and silently analyse the default 7-day pair instead of a 7-day one — the same
+ * class of mistake the dash guard exists to refuse, and invisible in the output.
+ * So a value is only accepted when it looks like a path: `.html`, or a `/` in it.
+ * Anything else is refused by name rather than guessed at.
+ */
+export function readHtmlPath(argv, index) {
+    const arg = argv[index];
+    const eq = arg.indexOf('=');
+    if (eq !== -1) {
+        const value = arg.slice(eq + 1);
+        if (!value)
+            throw new Error('--html= needs a path, or pass --html on its own');
+        return { value, used: 0 };
+    }
+    const next = argv[index + 1];
+    if (next === undefined || next.startsWith('-')) {
+        return { value: HABITS_HTML_DEFAULT_PATH, used: 0 };
+    }
+    if (!next.endsWith('.html') && !next.includes('/')) {
+        throw new Error(`--html does not understand "${next}" as a path (it needs a / or a .html suffix).\n` +
+            'Pass the window length before the flag: ccalyze --habits 7d --html report.html');
+    }
     return { value: next, used: 1 };
 }
 export function parseArgs(argv) {
@@ -42,6 +74,7 @@ export function parseArgs(argv) {
     let unit;
     let topProjects;
     let weekendDays;
+    let htmlPath;
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         const name = arg.split('=')[0];
@@ -77,6 +110,11 @@ export function parseArgs(argv) {
             i += read.used;
             weekendDays = parseWeekendDays(read.value);
         }
+        else if (name === '--html') {
+            const read = readHtmlPath(argv, i);
+            i += read.used;
+            htmlPath = read.value;
+        }
         else if (name === '--alias') {
             const read = readValue(argv, i, '--alias');
             i += read.used;
@@ -107,6 +145,12 @@ export function parseArgs(argv) {
             positional.push(arg);
     }
     const habitsLength = resolveHabitsLength(positional, flags.habits);
+    // Refused rather than ignored: a normal run has no second window, no scorecard
+    // and no levers, so there is no page to render — and a flag that appears to
+    // have worked while writing nothing is worse than one that says no.
+    if (htmlPath !== undefined && !flags.habits) {
+        throw new Error('--html renders the --habits report; add --habits (a normal run prints JSON only)');
+    }
     if (positional.length === 2 && DATE_RE.test(positional[0]) && DATE_RE.test(positional[1])) {
         return {
             rangeArg: 'custom',
@@ -118,10 +162,11 @@ export function parseArgs(argv) {
             topProjects,
             aliases,
             weekendDays,
+            htmlPath,
         };
     }
     const rangeArg = positional[0] ?? '7d';
-    return { rangeArg, ...flags, habitsLength, unit, topProjects, aliases, weekendDays };
+    return { rangeArg, ...flags, habitsLength, unit, topProjects, aliases, weekendDays, htmlPath };
 }
 /**
  * The one knob --habits exposes: the window LENGTH.
@@ -267,6 +312,14 @@ async function runHabits(claudeDir, args) {
     });
     for (const warning of warnings)
         console.error(warning);
+    // stdout stays JSON whether or not a page was asked for: it is the documented
+    // contract every caller already pipes, and the page is an addition to it, not a
+    // replacement. The path goes to stderr so `--html … > findings.json` still works.
+    if (args.htmlPath) {
+        const path = resolve(process.cwd(), args.htmlPath);
+        writeFileSync(path, renderHabitsHtml(report), 'utf8');
+        console.error(`wrote ${path}`);
+    }
     console.log(JSON.stringify(report, null, 2));
 }
 /**
@@ -295,6 +348,8 @@ Options:
 
 Habits — compares the last N complete days against the N before them:
   --habits [Nd]             window LENGTH, not a date range (default 7d)
+  --html [PATH]             also write the report as one self-contained HTML
+                            page (default ${HABITS_HTML_DEFAULT_PATH}); stdout stays JSON
   --single-window           describe one window; no comparison
   --unit NAME               what to call the cost figure (default "units")
   --top N                   projects in the table (default 8)

@@ -28,6 +28,9 @@ passes. Run `npm run verify` before claiming green.
 - `src/tips.ts` — recommendation generator
 - `src/habits.ts` — two-window habit comparison (`--habits`): window summary, scorecard, headline,
   savings levers, and the refusals that stop an uncomparable pair from being reported
+- `src/prose.ts` — deterministic prose for the `--html` report: every sentence is a rule over the
+  findings JSON, so no paragraph can quote a figure the tables do not have
+- `src/report.ts` — renders the habits report as one self-contained HTML page (`--habits --html`)
 - `src/cli.ts` — entry point, arg parsing, `analyzeRange()` (one window, shared by both modes)
 
 ## Two Modes, One Aggregation Path
@@ -40,6 +43,10 @@ derivation, so there must never be a second aggregation path.
 The window arithmetic lives in `habits.ts` (`resolveHabitWindows`), not in `resolveDateRange`: a
 habit window ends **yesterday** (the last complete day), while a normal range ends today. Those are
 different contracts on purpose, and merging them would silently bias every delta.
+
+`--html` renders that same report object and nothing else: the page embeds the JSON the run
+printed and computes every tile, row and bar from it in the browser, and `prose.ts` only ever
+quotes figures out of the same object. There is no second set of numbers to keep in step.
 
 Nothing in `habits.ts` touches the filesystem — it is pure functions over `CcalyzeOutput`, so the
 refusals and verdicts are testable without a transcript.
