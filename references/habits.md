@@ -71,15 +71,22 @@ data here, and the machine locale is not a stand-in — an `en-US` locale on an
 row files every Sunday as off-hours and misses Friday entirely, so pass
 `--weekend fri,sat`. The caveat block names whichever weekend was actually used.
 
-## Producing the report page (`--html`)
+## The report page, and publishing it
 
-Add `--html [PATH]` when the answer is going to be *read* by someone — the person themselves, a
-manager, the AI Enablement team — rather than piped into something. It writes the whole findings
-document as one self-contained HTML page, and stdout stays JSON, so both forms come out of one run:
+**Every `--habits` run writes the page. Publishing it as an Artifact is the default finish — not an
+extra someone has to ask for.** A person who asks why they keep hitting the limit wants a link they
+can read and forward, and the answer they should get back is that link plus a sentence, never a
+wall of JSON in the chat.
+
+The page lands in `~/.claude/ccalyze/habits-FROM_TO.html` unless `--html PATH` says otherwise, and
+stdout stays JSON, so one run produces both forms:
 
 ```bash
-$CC --habits 7d --html ~/usage-report.html > ~/findings.json
+$CC --habits 7d > ~/findings.json     # page path is printed on stderr
 ```
+
+`--no-html` skips the page. Use it only when nothing will be read by a human — a scripted
+collection, a size check, a pipeline. Not for a person asking a question.
 
 The page is generated, not composed: the conclusion paragraph, the three recommendations, the
 figure captions and the re-measure targets are all derived from the same JSON the run printed, by
@@ -92,7 +99,7 @@ Structure is fixed and deliberate: conclusion, recommendations, scorecard, figur
 Someone deciding whether to grant headroom reads the first screen and stops, so charts never come
 before the conclusion.
 
-Then publish it:
+Then publish it, every time:
 
 1. **Read the file** before it leaves the machine, and check the project labels — they are
    directory names. Re-run with `--alias OLD=NEW` or `--redact-projects` if any of them names a
@@ -100,12 +107,16 @@ Then publish it:
 2. **Publish with the Artifact tool**, passing that file path, a one-sentence `description`, and a
    `favicon`. The page is written for exactly this: no `<!doctype>`, `<html>` or `<body>` of its
    own, nothing loaded from another host, and it themes itself to the viewer's light/dark setting.
-3. **Send the link with one line of context** — which window, which finding, and what the person
-   is already changing. The page leads with the conclusion, which is what a reader needs.
+3. **Reply with the link and one line of context** — which window, which finding, and what the
+   person is already changing. The page leads with the conclusion, which is what a reader needs.
+   Do not re-narrate the report underneath it; the link is the deliverable.
+
+Only skip the publish when the person asked for the raw data, or asked not to publish.
 
 The CLI writes files; only Claude Code can publish an Artifact. That split is permanent — a
-standalone Node binary has no way to call the tool — so `--html` plus this step is the whole flow,
-and the page is complete and readable straight from disk if nobody publishes it.
+standalone Node binary has no way to call the tool — so the run plus this step is the whole flow,
+and the page is complete and readable straight from disk when someone runs the CLI in a terminal
+with no agent around to publish it.
 
 For a re-analysis by someone who will re-run the numbers themselves, send the JSON instead. The
 page is for reading; the JSON is for computing.

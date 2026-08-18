@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { statSync, existsSync, writeFileSync } from 'node:fs';
+import { statSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { parseSessionFile, parseHistoryFile } from "./parser.js";
 import { discoverSessionFiles, mergeSessions } from "./discovery.js";
 import { aggregate } from "./aggregator.js";
@@ -12,8 +12,19 @@ import { renderHabitsHtml } from "./report.js";
 import { VERSION } from "./version.js";
 /** Default window length for --habits, in days. */
 export const HABITS_DEFAULT_LENGTH = 7;
-/** Where `--habits --html` writes when no path is given. */
-export const HABITS_HTML_DEFAULT_PATH = 'ccalyze-habits.html';
+/** Directory the habits page lands in when no path is given. */
+export const HABITS_HTML_DIR = ['.claude', 'ccalyze'];
+/**
+ * Where the habits page goes unless `--html PATH` says otherwise.
+ *
+ * Under `~/.claude/`, never the working directory: `--habits` writes a page on
+ * every run now, and a run started inside a repo would drop an untracked
+ * `ccalyze-habits.html` next to the source — eventually into somebody's commit.
+ * The window is in the filename so consecutive runs do not overwrite each other.
+ */
+export function defaultHabitsHtmlPath(range, home = homedir()) {
+    return resolve(home, ...HABITS_HTML_DIR, `habits-${range.from}_${range.to}.html`);
+}
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * Read `--flag value` or `--flag=value`.
@@ -39,6 +50,8 @@ function readValue(argv, index, name) {
  * class of mistake the dash guard exists to refuse, and invisible in the output.
  * So a value is only accepted when it looks like a path: `.html`, or a `/` in it.
  * Anything else is refused by name rather than guessed at.
+ *
+ * @returns the path, or `undefined` for the default location
  */
 export function readHtmlPath(argv, index) {
     const arg = argv[index];
@@ -51,7 +64,7 @@ export function readHtmlPath(argv, index) {
     }
     const next = argv[index + 1];
     if (next === undefined || next.startsWith('-')) {
-        return { value: HABITS_HTML_DEFAULT_PATH, used: 0 };
+        return { value: undefined, used: 0 };
     }
     if (!next.endsWith('.html') && !next.includes('/')) {
         throw new Error(`--html does not understand "${next}" as a path (it needs a / or a .html suffix).\n` +
@@ -68,6 +81,9 @@ export function parseArgs(argv) {
         habits: false,
         singleWindow: false,
         redactProjects: false,
+        // On by default for --habits: the page IS the report for a human reader, and
+        // a flag nobody knew to pass is a feature nobody uses.
+        html: true,
     };
     const aliases = {};
     const positional = [];
@@ -75,6 +91,8 @@ export function parseArgs(argv) {
     let topProjects;
     let weekendDays;
     let htmlPath;
+    let htmlAsked = false;
+    let htmlOff = false;
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         const name = arg.split('=')[0];
@@ -92,6 +110,10 @@ export function parseArgs(argv) {
             flags.singleWindow = true;
         else if (name === '--redact-projects')
             flags.redactProjects = true;
+        else if (name === '--no-html') {
+            flags.html = false;
+            htmlOff = true;
+        }
         else if (name === '--unit') {
             const read = readValue(argv, i, '--unit');
             i += read.used;
@@ -114,6 +136,7 @@ export function parseArgs(argv) {
             const read = readHtmlPath(argv, i);
             i += read.used;
             htmlPath = read.value;
+            htmlAsked = true;
         }
         else if (name === '--alias') {
             const read = readValue(argv, i, '--alias');
@@ -147,9 +170,14 @@ export function parseArgs(argv) {
     const habitsLength = resolveHabitsLength(positional, flags.habits);
     // Refused rather than ignored: a normal run has no second window, no scorecard
     // and no levers, so there is no page to render — and a flag that appears to
-    // have worked while writing nothing is worse than one that says no.
-    if (htmlPath !== undefined && !flags.habits) {
-        throw new Error('--html renders the --habits report; add --habits (a normal run prints JSON only)');
+    // have worked while writing nothing is worse than one that says no. Same for
+    // --no-html, which would otherwise read as "this run was going to write one".
+    if (!flags.habits && (htmlAsked || htmlOff)) {
+        throw new Error(`${htmlOff ? '--no-html' : '--html'} applies to the --habits report; add --habits ` +
+            '(a normal run prints JSON and writes nothing)');
+    }
+    if (htmlOff && htmlAsked) {
+        throw new Error('--html and --no-html contradict each other; pass one');
     }
     if (positional.length === 2 && DATE_RE.test(positional[0]) && DATE_RE.test(positional[1])) {
         return {
@@ -312,13 +340,16 @@ async function runHabits(claudeDir, args) {
     });
     for (const warning of warnings)
         console.error(warning);
-    // stdout stays JSON whether or not a page was asked for: it is the documented
+    // stdout stays JSON whether or not a page was written: it is the documented
     // contract every caller already pipes, and the page is an addition to it, not a
-    // replacement. The path goes to stderr so `--html … > findings.json` still works.
-    if (args.htmlPath) {
-        const path = resolve(process.cwd(), args.htmlPath);
+    // replacement. The path goes to stderr so `--habits > findings.json` still works.
+    if (args.html) {
+        const path = args.htmlPath
+            ? resolve(process.cwd(), args.htmlPath)
+            : defaultHabitsHtmlPath(report.current.range);
+        mkdirSync(dirname(path), { recursive: true });
         writeFileSync(path, renderHabitsHtml(report), 'utf8');
-        console.error(`wrote ${path}`);
+        console.error(`report: ${path}`);
     }
     console.log(JSON.stringify(report, null, 2));
 }
@@ -348,8 +379,9 @@ Options:
 
 Habits — compares the last N complete days against the N before them:
   --habits [Nd]             window LENGTH, not a date range (default 7d)
-  --html [PATH]             also write the report as one self-contained HTML
-                            page (default ${HABITS_HTML_DEFAULT_PATH}); stdout stays JSON
+  --html [PATH]             where to write the report page
+                            (default ~/${HABITS_HTML_DIR.join('/')}/habits-FROM_TO.html)
+  --no-html                 skip the page; print the JSON only
   --single-window           describe one window; no comparison
   --unit NAME               what to call the cost figure (default "units")
   --top N                   projects in the table (default 8)

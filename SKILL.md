@@ -223,7 +223,9 @@ window length, the refusal/warning cases, how to read the scorecard/headline/lev
 report page and how to publish it, and the common mistakes. Nothing here duplicates it, so skip
 both the flag and the read for any request Steps 1-4 already answer.
 
-If the answer is going to be **read** rather than piped, add `--html PATH`: the same run also
-writes the whole findings document as one self-contained page (conclusion and recommendations
-first, then the scorecard, figures and reading notes), ready to publish with the Artifact tool.
-`references/habits.md` has the publishing steps and the label check to do first.
+**Every `--habits` run writes a report page and you publish it.** The run drops one
+self-contained HTML file (conclusion and recommendations first, then the scorecard, figures and
+reading notes) at `~/.claude/ccalyze/habits-FROM_TO.html`, prints that path on stderr, and prints
+the JSON on stdout as always. Check the project labels, publish the file with the **Artifact**
+tool, and answer with the link plus one line of context — not with the JSON, and not with a
+re-narration of the page. `references/habits.md` has the label check and the publish steps.
