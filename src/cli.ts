@@ -34,6 +34,8 @@ export interface ParsedArgs {
   json: boolean;
   deep: boolean;
   version: boolean;
+  /** Print usage and exit 0. */
+  help: boolean;
   /** Compare the last N complete days against the N before them. */
   habits: boolean;
   /** Window LENGTH in days for --habits. The dates are never settable. */
@@ -72,6 +74,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     json: false,
     deep: false,
     version: false,
+    help: false,
     habits: false,
     singleWindow: false,
     redactProjects: false,
@@ -88,6 +91,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (name === '--json') flags.json = true;
     else if (name === '--deep') flags.deep = true;
     else if (name === '--version' || name === '-v') flags.version = true;
+    else if (name === '--help' || name === '-h') flags.help = true;
     else if (name === '--habits') flags.habits = true;
     else if (name === '--single-window') flags.singleWindow = true;
     else if (name === '--redact-projects') flags.redactProjects = true;
@@ -193,21 +197,30 @@ export function resolveDateRange(rangeArg: string, customFrom?: string, customTo
     return { from: todayStr, to: todayStr };
   }
 
-  if (rangeArg === 'custom' && customFrom && customTo) {
+  if (rangeArg === 'custom') {
+    if (!customFrom || !customTo) {
+      throw new Error('a custom range needs both a start and an end date');
+    }
     return { from: customFrom, to: customTo };
   }
 
   const match = rangeArg.match(/^(\d+)d$/);
   if (match) {
     const days = parseInt(match[1], 10);
+    if (days < 1) throw new Error(`range must cover at least one day, got "${rangeArg}"`);
     const from = new Date(today);
     from.setDate(from.getDate() - (days - 1));
     return { from: from.toISOString().slice(0, 10), to: todayStr };
   }
 
-  const from = new Date(today);
-  from.setDate(from.getDate() - 6);
-  return { from: from.toISOString().slice(0, 10), to: todayStr };
+  // Refused, never defaulted. This used to fall through to a 7-day window, so
+  // `ccalyze tody` exited 0 with a report indistinguishable from a deliberate
+  // `ccalyze 7d` — the mistake is invisible in the output, which is the one place
+  // someone might have caught it. Same principle the flag parser already applies.
+  throw new Error(
+    `unknown range "${rangeArg}". Use today, Nd (e.g. 7d, 30d), ` +
+      'or two YYYY-MM-DD dates.',
+  );
 }
 
 /**
@@ -315,8 +328,50 @@ async function runHabits(claudeDir: string, args: ParsedArgs): Promise<void> {
   console.log(JSON.stringify(report, null, 2));
 }
 
+/**
+ * Usage text.
+ *
+ * Added with the widened dash guard: `-h` is the most common way someone asks a
+ * CLI what it does, and refusing it with a bare `unknown option -h` and nothing
+ * else makes the stricter parsing feel broken rather than careful.
+ */
+const USAGE = `ccalyze ${VERSION} — Claude Code usage analyzer
+
+Usage:
+  ccalyze [RANGE] [options]
+  ccalyze --habits [LENGTH] [options]
+
+Range (default 7d):
+  today                     today only
+  Nd                        last N days, e.g. 7d, 30d
+  YYYY-MM-DD YYYY-MM-DD     explicit start and end
+
+Options:
+  --deep                    include the per-prompt index
+  --json                    emit JSON (the default, and the only, output)
+  --version, -v             print version
+  --help, -h                this text
+
+Habits — compares the last N complete days against the N before them:
+  --habits [Nd]             window LENGTH, not a date range (default 7d)
+  --single-window           describe one window; no comparison
+  --unit NAME               what to call the cost figure (default "units")
+  --top N                   projects in the table (default 8)
+  --alias OLD=NEW           rename a project label (repeatable)
+  --redact-projects         replace every label with project-1, project-2, …
+  --weekend DAYS            weekend for the off-hours row, e.g. fri,sat
+                            (default sat,sun; "none" for a weekend-free week)
+
+Cost is priced at published per-token API list rates, which is not what a
+subscription charges. Treat it as a quota proxy, never as spend.`;
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+
+  if (args.help) {
+    console.log(USAGE);
+    return;
+  }
 
   if (args.version) {
     console.log(VERSION);
