@@ -175,4 +175,29 @@ describe('mergeSessions', () => {
     assert.equal(merged[0].promptCount, 8);
     assert.equal(merged[0].transcriptSizeMB, 12);
   });
+
+  // autoCompactions is a per-file scalar exactly like promptCount: it is counted
+  // once per transcript, not per message, so the by-requestId merge cannot carry
+  // it. A session whose first file never auto-compacted but whose later file did
+  // would otherwise read 'none' and get flagged no-compaction — the precise
+  // miscategorisation the auto-compaction split exists to fix.
+  it('sums autoCompactions across genuinely different transcripts', () => {
+    const merged = mergeSessions([
+      session({ filePaths: ['/main.jsonl'], autoCompactions: 0 }),
+      session({
+        filePaths: ['/resumed.jsonl'],
+        autoCompactions: 2,
+        messages: [msg('sub-1')],
+      }),
+    ]);
+    assert.equal(merged[0].autoCompactions, 2);
+  });
+
+  it('does not double autoCompactions for an identical filePath', () => {
+    const merged = mergeSessions([
+      session({ filePaths: ['/same.jsonl'], autoCompactions: 3 }),
+      session({ filePaths: ['/same.jsonl'], autoCompactions: 3 }),
+    ]);
+    assert.equal(merged[0].autoCompactions, 3);
+  });
 });

@@ -126,6 +126,7 @@ ccalyze --habits --redact-projects          # every label becomes project-1, pro
 ccalyze --habits --alias acme-migration=customer-a
 ccalyze --habits --unit "quota units"       # what to call the cost figure
 ccalyze --habits --top 5                    # projects in the table
+ccalyze --habits --weekend fri,sat          # Sun-Thu work week (default is sat,sun)
 ccalyze --habits --single-window            # first-ever run: describes habits, cannot track them
 ```
 

@@ -7,7 +7,7 @@ import { discoverSessionFiles, mergeSessions } from "./discovery.js";
 import { aggregate } from "./aggregator.js";
 import { detectAnomalies } from "./anomalies.js";
 import { generateTips } from "./tips.js";
-import { buildHabitsReport, HabitsRefusal, resolveHabitWindows } from "./habits.js";
+import { buildHabitsReport, HabitsRefusal, parseWeekendDays, resolveHabitWindows, } from "./habits.js";
 import { VERSION } from "./version.js";
 /** Default window length for --habits, in days. */
 export const HABITS_DEFAULT_LENGTH = 7;
@@ -41,6 +41,7 @@ export function parseArgs(argv) {
     const positional = [];
     let unit;
     let topProjects;
+    let weekendDays;
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         const name = arg.split('=')[0];
@@ -71,6 +72,11 @@ export function parseArgs(argv) {
                 throw new Error(`--top needs a positive whole number, got ${read.value}`);
             topProjects = parsed;
         }
+        else if (name === '--weekend') {
+            const read = readValue(argv, i, '--weekend');
+            i += read.used;
+            weekendDays = parseWeekendDays(read.value);
+        }
         else if (name === '--alias') {
             const read = readValue(argv, i, '--alias');
             i += read.used;
@@ -100,10 +106,11 @@ export function parseArgs(argv) {
             unit,
             topProjects,
             aliases,
+            weekendDays,
         };
     }
     const rangeArg = positional[0] ?? '7d';
-    return { rangeArg, ...flags, habitsLength, unit, topProjects, aliases };
+    return { rangeArg, ...flags, habitsLength, unit, topProjects, aliases, weekendDays };
 }
 /**
  * The one knob --habits exposes: the window LENGTH.
@@ -237,6 +244,7 @@ async function runHabits(claudeDir, args) {
         topProjects: args.topProjects,
         aliases: args.aliases,
         redactProjects: args.redactProjects,
+        weekendDays: args.weekendDays,
     });
     for (const warning of warnings)
         console.error(warning);

@@ -8,7 +8,12 @@ import { discoverSessionFiles, mergeSessions } from './discovery.ts';
 import { aggregate, type EnrichedSession } from './aggregator.ts';
 import { detectAnomalies } from './anomalies.ts';
 import { generateTips } from './tips.ts';
-import { buildHabitsReport, HabitsRefusal, resolveHabitWindows } from './habits.ts';
+import {
+  buildHabitsReport,
+  HabitsRefusal,
+  parseWeekendDays,
+  resolveHabitWindows,
+} from './habits.ts';
 import type { CcalyzeOutput, DateRange } from './types.ts';
 import { VERSION } from './version.ts';
 
@@ -36,6 +41,8 @@ export interface ParsedArgs {
   /** `OLD=NEW` project-label renames for the habits report. */
   aliases: Record<string, string>;
   redactProjects: boolean;
+  /** Days counting as the weekend for the off-hours row, `0` = Sunday. */
+  weekendDays?: number[];
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -68,6 +75,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const positional: string[] = [];
   let unit: string | undefined;
   let topProjects: number | undefined;
+  let weekendDays: number[] | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -89,6 +97,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const parsed = Number(read.value);
       if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`--top needs a positive whole number, got ${read.value}`);
       topProjects = parsed;
+    } else if (name === '--weekend') {
+      const read = readValue(argv, i, '--weekend');
+      i += read.used;
+      weekendDays = parseWeekendDays(read.value);
     } else if (name === '--alias') {
       const read = readValue(argv, i, '--alias');
       i += read.used;
@@ -116,11 +128,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       unit,
       topProjects,
       aliases,
+      weekendDays,
     };
   }
 
   const rangeArg = positional[0] ?? '7d';
-  return { rangeArg, ...flags, habitsLength, unit, topProjects, aliases };
+  return { rangeArg, ...flags, habitsLength, unit, topProjects, aliases, weekendDays };
 }
 
 /**
@@ -280,6 +293,7 @@ async function runHabits(claudeDir: string, args: ParsedArgs): Promise<void> {
     topProjects: args.topProjects,
     aliases: args.aliases,
     redactProjects: args.redactProjects,
+    weekendDays: args.weekendDays,
   });
 
   for (const warning of warnings) console.error(warning);

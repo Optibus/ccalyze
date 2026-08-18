@@ -113,6 +113,20 @@ describe('parseArgs — habits report options', () => {
     assert.deepEqual(args.aliases, { a: 'one', b: 'two' });
   });
 
+  it('parses --weekend into day indices, both spellings', () => {
+    assert.deepEqual(parseArgs(['--habits', '--weekend', 'fri,sat']).weekendDays, [5, 6]);
+    assert.deepEqual(parseArgs(['--habits', '--weekend=fri,sat']).weekendDays, [5, 6]);
+    assert.deepEqual(parseArgs(['--habits', '--weekend', 'none']).weekendDays, []);
+  });
+
+  it('leaves weekendDays unset when --weekend is not passed, so the default applies', () => {
+    assert.equal(parseArgs(['--habits']).weekendDays, undefined);
+  });
+
+  it('refuses a --weekend day it does not recognise', () => {
+    assert.throws(() => parseArgs(['--habits', '--weekend', 'funday']), /funday/);
+  });
+
   it('parses --redact-projects', () => {
     assert.equal(parseArgs(['--habits', '--redact-projects']).redactProjects, true);
   });

@@ -63,6 +63,13 @@ project:
 | `--redact-projects` | Replace every label with `project-1`, `project-2`, … |
 | `--unit NAME` | What to call the cost figure (default `units`). |
 | `--top N` | Projects in the table (default 8). |
+| `--weekend DAYS` | Which days the off-hours row counts as the weekend, e.g. `fri,sat` (default `sat,sun`; `none` for a weekend-free week). |
+
+The weekend default is *stated, not detected*. Node exposes no weekend-per-region
+data here, and the machine locale is not a stand-in — an `en-US` locale on an
+`Asia/Jerusalem` clock is ordinary. Left unset on a Sun-Thu week, the off-hours
+row files every Sunday as off-hours and misses Friday entirely, so pass
+`--weekend fri,sat`. The caveat block names whichever weekend was actually used.
 
 ## Reading the output
 

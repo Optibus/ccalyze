@@ -16,6 +16,7 @@ import {
   scorecard,
   spanDays,
   summarizeWindow,
+  parseWeekendDays,
   validateWindowPair,
 } from './habits.ts';
 import type {
@@ -355,6 +356,49 @@ describe('summarizeWindow', () => {
       output({ sessions: [session({ costUSD: 10, startTime: '2026-08-10T20:00:00.000Z' })] }),
     );
     assert.equal(justPast.offHoursShare, 100);
+  });
+
+  // Sat/Sun is not the weekend everywhere. Israel, most of the Gulf and others
+  // work Sun-Thu, which would file every Sunday session as off-hours and miss
+  // Friday entirely — on exactly the machine whose local clock is being read.
+  it('honours a caller-supplied weekend, so Sunday can be a working day', () => {
+    const sessions = [
+      // Sunday 14:00 UTC — weekend under the default, a working day under Fri/Sat.
+      session({ id: 'sunday', costUSD: 50, startTime: '2026-08-16T14:00:00.000Z' }),
+      // Friday 14:00 UTC — a working day under the default, weekend under Fri/Sat.
+      session({ id: 'friday', costUSD: 50, startTime: '2026-08-14T14:00:00.000Z' }),
+    ];
+
+    const dflt = summarizeWindow(output({ sessions }));
+    assert.equal(dflt.offHoursShare, 50, 'default weekend should count only Sunday');
+
+    const israeli = summarizeWindow(output({ sessions }), { weekendDays: [5, 6] });
+    assert.equal(israeli.offHoursShare, 50, 'Fri/Sat weekend should count only Friday');
+
+    // The two must not agree by accident: check which session was counted.
+    const sundayOnly = summarizeWindow(output({ sessions: [sessions[0]] }), {
+      weekendDays: [5, 6],
+    });
+    assert.equal(sundayOnly.offHoursShare, 0, 'Sunday is a working day under Fri/Sat');
+  });
+});
+
+describe('parseWeekendDays', () => {
+  it('reads three-letter day names, case and order insensitive', () => {
+    assert.deepEqual(parseWeekendDays('fri,sat'), [5, 6]);
+    assert.deepEqual(parseWeekendDays('SAT, SUN'), [0, 6]);
+    assert.deepEqual(parseWeekendDays('sun'), [0]);
+  });
+
+  it('accepts an explicitly empty weekend', () => {
+    assert.deepEqual(parseWeekendDays('none'), []);
+  });
+
+  it('refuses a name it does not recognise rather than dropping it', () => {
+    // Silently ignoring a typo would report an off-hours share computed from a
+    // weekend the person did not ask for, and nothing downstream could detect it.
+    assert.throws(() => parseWeekendDays('fri,satrday'), /satrday/);
+    assert.throws(() => parseWeekendDays(''), /weekend/i);
   });
 
   it('surfaces the subagent token share from the run summary, as a percentage', () => {

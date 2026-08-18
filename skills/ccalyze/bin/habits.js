@@ -47,6 +47,58 @@ export const NOISE_FLOOR = 0.05;
 export const OFF_HOURS_START = 20;
 /** Local hour before which a session's start still reads as night. */
 export const OFF_HOURS_END = 8;
+/**
+ * Days that count as the weekend when the caller does not say, `0` = Sunday.
+ *
+ * A default, never a detection. Node exposes no weekend-per-region data at this
+ * version (`Intl.Locale.getWeekInfo` is not available), and the machine locale is
+ * not a usable stand-in: an `en-US` locale on an `Asia/Jerusalem` clock is
+ * ordinary, and guessing from it would confidently file every Sunday as
+ * off-hours for someone working a Sun-Thu week. So the default is stated rather
+ * than inferred, and `--weekend` overrides it.
+ */
+export const DEFAULT_WEEKEND_DAYS = [0, 6];
+const DAY_NAMES = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const FULL_DAY_NAMES = [
+    'sunday',
+    'monday',
+    'tuesday',
+    'wednesday',
+    'thursday',
+    'friday',
+    'saturday',
+];
+/**
+ * Read `fri,sat` into day indices, or `none` for a weekend-free week.
+ *
+ * Unknown names throw rather than being skipped: a dropped day silently changes
+ * the off-hours share to one computed from a weekend nobody asked for, and the
+ * output carries no trace of which weekend was actually used.
+ */
+export function parseWeekendDays(spec) {
+    const trimmed = spec.trim().toLowerCase();
+    if (!trimmed)
+        throw new Error('--weekend needs day names, e.g. fri,sat (or none)');
+    if (trimmed === 'none')
+        return [];
+    const days = new Set();
+    for (const part of trimmed.split(',')) {
+        const name = part.trim();
+        // Exact names only. Matching a three-letter *prefix* would quietly accept
+        // "satrday" as Saturday, which is the typo-swallowing this exists to refuse.
+        const index = name.length === 3 ? DAY_NAMES.indexOf(name) : FULL_DAY_NAMES.indexOf(name);
+        if (index === -1) {
+            throw new Error(`--weekend does not understand the day "${name}". ` +
+                `Use ${DAY_NAMES.join(', ')} — or none.`);
+        }
+        days.add(index);
+    }
+    return [...days].sort((a, b) => a - b);
+}
+/** Day indices as a readable list, for the caveat that states which weekend was used. */
+function weekendLabel(days) {
+    return days.length ? days.map((d) => FULL_DAY_NAMES[d]).join(' and ') : 'no days';
+}
 /** Relative move at or above which a row reads `much better` rather than `better`. */
 export const STRONG_MOVE = 0.25;
 const DURATION_BANDS = [
@@ -98,11 +150,11 @@ function behavioural(session) {
  * running ccalyze right now". That is honest only when it is the same
  * device/time zone the work happened in, which is the caveat this ships with.
  */
-function isOffHours(session) {
+function isOffHours(session, weekend) {
     const start = new Date(session.startTime);
     const hour = start.getHours();
     const day = start.getDay(); // 0 = Sunday, 6 = Saturday
-    return hour >= OFF_HOURS_START || hour < OFF_HOURS_END || day === 0 || day === 6;
+    return hour >= OFF_HOURS_START || hour < OFF_HOURS_END || weekend.has(day);
 }
 /** Days as a whole number between two `YYYY-MM-DD` dates. Both UTC, so exact. */
 function daysBetween(from, to) {
@@ -225,7 +277,10 @@ export function summarizeWindow(output, options = {}) {
         .sort((a, b) => b.costUSD - a.costUSD)
         .slice(0, 3)
         .reduce((sum, row) => sum + row.costUSD, 0);
-    const offHoursCost = sessions.filter(isOffHours).reduce((sum, row) => sum + row.costUSD, 0);
+    const weekend = new Set(options.weekendDays ?? DEFAULT_WEEKEND_DAYS);
+    const offHoursCost = sessions
+        .filter((s) => isOffHours(s, weekend))
+        .reduce((sum, row) => sum + row.costUSD, 0);
     const coldExtra = sessions.reduce((sum, row) => sum + (row.coldStartExtraUSD || 0), 0);
     const anomalyCounts = countAnomalies(output.anomalies);
     const cleanPrompts = clean.reduce((sum, row) => sum + row.prompts, 0);
@@ -518,8 +573,11 @@ export function buildHabitsReport(currentOutput, priorOutput, options = {}) {
                 'direction across two windows, not the level in one.',
             offHoursIsLocalClock: 'Off-hours reads the local clock of the machine that ran ccalyze, because the ' +
                 'transcript stores no time zone at all — only honest when that machine and time ' +
-                "zone match where the work actually happened. Rising night/weekend share is a " +
-                'burnout signal, not a cost one; read it on its own, not folded into the headline.',
+                'zone match where the work actually happened. Weekend counted as ' +
+                `${weekendLabel(options.weekendDays ?? DEFAULT_WEEKEND_DAYS)}, which is a stated ` +
+                'default rather than a detected one — pass --weekend for a Sun-Thu week. ' +
+                'Rising night/weekend share is a burnout signal, not a cost one; read it on its ' +
+                'own, not folded into the headline.',
             cleanCohort: `Unflagged sessions hold ${current.clean.promptShare}% of prompts` +
                 (current.cleanCohortUsable
                     ? ' — usable as a baseline.'
