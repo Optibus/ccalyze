@@ -1,0 +1,32 @@
+# The full gate, run on every push and PR.
+#
+# `npm test` alone is weaker than it looks: tsconfig.json excludes *.test.ts and
+# --experimental-strip-types erases types without checking them, so a type-invalid
+# test still passes. `npm run verify` is typecheck + typecheck:tests + test, and it
+# also runs the bundle-staleness check that compares skills/ccalyze/bin against a
+# fresh compile of src/ — the bundle is what plugin installs actually execute, so a
+# stale one shipping green is the failure this exists to catch.
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22+, not the >=18 in package.json engines: the test script relies on
+      # `node --test` expanding src/**/*.test.ts itself (the shell leaves the glob
+      # alone), and on --experimental-strip-types, neither of which exists on 18.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run verify
