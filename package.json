@@ -1,6 +1,6 @@
 {
   "name": "ccalyze",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Claude Code usage analyzer \u2014 costs, anomalies, and optimization tips",
   "type": "module",
   "bin": {

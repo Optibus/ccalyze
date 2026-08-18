@@ -89,9 +89,15 @@ export function parseArgs(argv) {
             // positional, so `--topp 2` reads as a 2-day window instead of the default 7.
             //
             // Single-dash too, not just `--`: no positional this CLI accepts begins with
-            // a dash (ranges are `7d`/`today`, custom ranges are two ISO dates), so `-x`
-            // reaching the positional list could only ever be read as a range named
-            // "-x" — a silent misread of something the person spelled wrong.
+            // a dash (ranges are `7d`/`today`, custom ranges are two ISO dates), so a
+            // dashed argument reaching the positional list is always a mistake. It did
+            // not fail loudly there — `resolveDateRange` falls back to the default 7-day
+            // window for anything it does not recognise, so `ccalyze -x` returned a
+            // perfectly plausible report for a window the person never asked for.
+            //
+            // That fallback is the wider bug and it is still there: `7dd`, `tody` and
+            // `banana` all still resolve to a silent default 7d. This guard only closes
+            // the dash-shaped subset of it.
             throw new Error(`unknown option ${name}`);
         }
         else
