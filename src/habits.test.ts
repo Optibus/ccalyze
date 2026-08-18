@@ -1,0 +1,804 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+// Off-hours detection reads the local clock (there is no time zone in a
+// transcript to read instead). Pin the suite to UTC so its verdict does not
+// depend on whatever time zone happens to run the tests.
+process.env.TZ = 'UTC';
+import {
+  buildHabitsReport,
+  HabitsRefusal,
+  headline,
+  levers,
+  pct,
+  ratioDelta,
+  resolveHabitWindows,
+  scorecard,
+  spanDays,
+  summarizeWindow,
+  parseWeekendDays,
+  validateWindowPair,
+} from './habits.ts';
+import type {
+  Anomaly,
+  CcalyzeOutput,
+  DateRange,
+  DaySummary,
+  ModelSummary,
+  ProjectSummary,
+  SessionFlag,
+  SessionSummary,
+} from './types.ts';
+
+// --- fixtures ---------------------------------------------------------------
+
+interface SessionSpec {
+  id?: string;
+  project?: string;
+  primaryModel?: string;
+  durationMinutes?: number;
+  prompts?: number;
+  costUSD?: number;
+  flags?: SessionFlag[];
+  coldStartExtraUSD?: number;
+  startTime?: string;
+  compaction?: SessionSummary['compaction'];
+  autoCompactions?: number;
+  reworkEdits?: number;
+}
+
+function session(spec: SessionSpec = {}): SessionSummary {
+  return {
+    id: spec.id ?? 's1',
+    name: spec.id ?? 's1',
+    project: spec.project ?? 'proj-a',
+    primaryModel: spec.primaryModel ?? 'claude-sonnet-4-5',
+    // A Monday at 09:00 — deterministically on-hours regardless of the test
+    // machine's time zone, since the suite pins TZ=UTC below.
+    startTime: spec.startTime ?? '2026-08-10T09:00:00.000Z',
+    endTime: '2026-08-10T10:00:00.000Z',
+    durationMinutes: spec.durationMinutes ?? 60,
+    prompts: spec.prompts ?? 10,
+    costUSD: spec.costUSD ?? 1,
+    transcriptSizeMB: 1,
+    flags: spec.flags ?? [],
+    cacheReadRatio: 0.95,
+    coldStarts: spec.coldStartExtraUSD ? 1 : 0,
+    coldStartExtraUSD: spec.coldStartExtraUSD ?? 0,
+    compaction: spec.compaction ?? 'none',
+    autoCompactions: spec.autoCompactions ?? 0,
+    reworkEdits: spec.reworkEdits ?? 0,
+  };
+}
+
+interface OutputSpec {
+  range?: DateRange;
+  sessions?: SessionSummary[];
+  daysCovered?: number;
+  byModel?: Record<string, ModelSummary>;
+  byProject?: ProjectSummary[];
+  anomalies?: Anomaly[];
+  cacheReadRatio?: number;
+  sidechainTokenShare?: number;
+}
+
+/** A CcalyzeOutput whose summary is derived from its sessions, as a real run's is. */
+function output(spec: OutputSpec = {}): CcalyzeOutput {
+  const sessions = spec.sessions ?? [session()];
+  const range = spec.range ?? { from: '2026-08-10', to: '2026-08-16' };
+  const daysCovered = spec.daysCovered ?? spanDays(range);
+  const byDay: DaySummary[] = Array.from({ length: daysCovered }, (_, i) => ({
+    date: new Date(Date.parse(`${range.from}T00:00:00Z`) + i * 86_400_000)
+      .toISOString()
+      .slice(0, 10),
+    costUSD: 0,
+    sessions: 0,
+    prompts: 0,
+    tokensByModel: {},
+  }));
+
+  return {
+    range,
+    summary: {
+      totalCostUSD: sessions.reduce((sum, s) => sum + s.costUSD, 0),
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+      totalCacheReadTokens: 0,
+      totalCacheWriteTokens: 0,
+      totalSessions: sessions.length,
+      totalPrompts: sessions.reduce((sum, s) => sum + s.prompts, 0),
+      cacheReadRatio: spec.cacheReadRatio ?? 0.95,
+      sidechainTokenShare: spec.sidechainTokenShare ?? 0,
+    },
+    byDay,
+    byModel: spec.byModel ?? {},
+    byProject: spec.byProject ?? [],
+    sessions,
+    anomalies: spec.anomalies ?? [],
+    tips: [],
+  };
+}
+
+function project(name: string, costUSD: number, prompts: number): ProjectSummary {
+  return { project: name, costUSD, sessions: 1, prompts, transcriptSizeMB: 1 };
+}
+
+// --- helpers ----------------------------------------------------------------
+
+describe('pct / ratioDelta', () => {
+  it('reads a zero whole as 0 rather than NaN', () => {
+    assert.equal(pct(5, 0), 0);
+  });
+
+  it('returns null when there is no prior figure', () => {
+    assert.equal(ratioDelta(10, null), null);
+    assert.equal(ratioDelta(10, 0), null);
+  });
+
+  it('computes a percent change', () => {
+    assert.equal(ratioDelta(150, 100), 50);
+    assert.equal(ratioDelta(50, 100), -50);
+  });
+});
+
+// --- window arithmetic ------------------------------------------------------
+
+describe('resolveHabitWindows', () => {
+  it('ends the current window yesterday, never today', () => {
+    const { current } = resolveHabitWindows(7, '2026-08-17');
+    assert.equal(current.to, '2026-08-16');
+    assert.equal(current.from, '2026-08-10');
+  });
+
+  it('places the prior window immediately before, with no gap and no overlap', () => {
+    const { current, prior } = resolveHabitWindows(7, '2026-08-17');
+    assert.equal(prior.from, '2026-08-03');
+    assert.equal(prior.to, '2026-08-09');
+    assert.equal(
+      Date.parse(`${current.from}T00:00:00Z`) - Date.parse(`${prior.to}T00:00:00Z`),
+      86_400_000,
+    );
+  });
+
+  it('makes both windows exactly N days, inclusive, at every length', () => {
+    for (const length of [7, 15, 30]) {
+      const { current, prior } = resolveHabitWindows(length, '2026-08-17');
+      assert.equal(spanDays(current), length);
+      assert.equal(spanDays(prior), length);
+    }
+  });
+
+  it('crosses a month and a year boundary correctly', () => {
+    assert.deepEqual(resolveHabitWindows(7, '2026-01-05'), {
+      current: { from: '2025-12-29', to: '2026-01-04' },
+      prior: { from: '2025-12-22', to: '2025-12-28' },
+    });
+  });
+
+  it('rejects a length no comparison could use', () => {
+    assert.throws(() => resolveHabitWindows(1, '2026-08-17'), /2 days or more/);
+    assert.throws(() => resolveHabitWindows(7.5, '2026-08-17'), /whole number/);
+  });
+});
+
+// --- window summary ---------------------------------------------------------
+
+describe('summarizeWindow', () => {
+  it('computes per-prompt consumption from the window totals', () => {
+    const window = summarizeWindow(
+      output({ sessions: [session({ costUSD: 30, prompts: 100 })] }),
+    );
+    assert.equal(window.cost, 30);
+    assert.equal(window.prompts, 100);
+    assert.equal(window.perPrompt, 0.3);
+  });
+
+  it('excludes high-cost from the behavioural split, so the metric is not circular', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'expensive-but-clean', costUSD: 40, prompts: 50, flags: ['high-cost'] }),
+          session({ id: 'flagged', costUSD: 10, prompts: 50, flags: ['no-compaction'] }),
+        ],
+      }),
+    );
+    assert.equal(window.flagged.sessions, 1);
+    assert.equal(window.flagged.cost, 10);
+    assert.equal(window.clean.sessions, 1);
+    assert.equal(window.clean.cost, 40);
+  });
+
+  it('marks the clean cohort unusable below the prompt floor', () => {
+    const thin = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', prompts: 97, flags: ['long-running'] }),
+          session({ id: 'b', prompts: 3 }),
+        ],
+      }),
+    );
+    assert.equal(thin.clean.promptShare, 3);
+    assert.equal(thin.cleanCohortUsable, false);
+
+    const usable = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', prompts: 80, flags: ['long-running'] }),
+          session({ id: 'b', prompts: 20 }),
+        ],
+      }),
+    );
+    assert.equal(usable.cleanCohortUsable, true);
+  });
+
+  it('concentrates on the three priciest sessions', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', costUSD: 40 }),
+          session({ id: 'b', costUSD: 30 }),
+          session({ id: 'c', costUSD: 20 }),
+          session({ id: 'd', costUSD: 10 }),
+        ],
+      }),
+    );
+    assert.equal(window.top3Share, 90);
+  });
+
+  it('sums the cold-start premium and counts the anomaly, not the sessions', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', costUSD: 50, coldStartExtraUSD: 4 }),
+          session({ id: 'b', costUSD: 50, coldStartExtraUSD: 1 }),
+        ],
+        anomalies: [
+          { type: 'cache_cold_start', severity: 'medium', sessionId: 'a', detail: 'x' },
+        ],
+      }),
+    );
+    assert.equal(window.coldStart.extra, 5);
+    assert.equal(window.coldStart.share, 5);
+    assert.equal(window.coldStart.sessions, 1);
+  });
+
+  it('bands sessions by duration, with over-24h its own band', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'short', durationMinutes: 30, costUSD: 10 }),
+          session({ id: 'marathon', durationMinutes: 2000, costUSD: 90 }),
+        ],
+      }),
+    );
+    const over24h = window.byDuration.find((band) => band.band === 'over 24 h')!;
+    assert.equal(over24h.sessions, 1);
+    assert.equal(over24h.costShare, 90);
+    assert.equal(window.byDuration.find((b) => b.band === 'under 1 h')!.sessions, 1);
+  });
+
+  it('keeps both model views: per-session for rates, token-level for share', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [session({ primaryModel: 'claude-opus-4-6', costUSD: 100, prompts: 50 })],
+        byModel: {
+          'claude-opus-4-6': {
+            costUSD: 60,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            sessions: 1,
+          },
+          'claude-haiku-4-5': {
+            costUSD: 40,
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            sessions: 1,
+          },
+        },
+      }),
+    );
+    assert.equal(window.byModel[0].model, 'opus-4-6');
+    assert.equal(window.byModel[0].perPrompt, 2);
+    assert.deepEqual(
+      window.modelCostShare.map((row) => [row.model, row.costShare]),
+      [
+        ['opus-4-6', 60],
+        ['haiku-4-5', 40],
+      ],
+    );
+  });
+
+  it('caps the project table at --top', () => {
+    const window = summarizeWindow(
+      output({
+        byProject: [project('a', 3, 10), project('b', 2, 10), project('c', 1, 10)],
+      }),
+      { topProjects: 2 },
+    );
+    assert.deepEqual(
+      window.byProject.map((row) => row.project),
+      ['a', 'b'],
+    );
+  });
+
+  it('shares off-hours cost by session start, night and weekend both counting', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          // Monday 09:00 — on-hours.
+          session({ id: 'daytime', costUSD: 40, startTime: '2026-08-10T09:00:00.000Z' }),
+          // Monday 22:00 — night.
+          session({ id: 'night', costUSD: 30, startTime: '2026-08-10T22:00:00.000Z' }),
+          // Saturday 14:00 — weekend, even though the hour is daytime.
+          session({ id: 'weekend', costUSD: 30, startTime: '2026-08-15T14:00:00.000Z' }),
+        ],
+      }),
+    );
+    assert.equal(window.offHoursShare, 60);
+  });
+
+  it('reads 08:00 and 20:00 as the on-hours boundary, inclusive of neither night end', () => {
+    const atBoundary = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'open', costUSD: 50, startTime: '2026-08-10T08:00:00.000Z' }),
+          session({ id: 'close', costUSD: 50, startTime: '2026-08-10T19:59:00.000Z' }),
+        ],
+      }),
+    );
+    assert.equal(atBoundary.offHoursShare, 0);
+
+    const justPast = summarizeWindow(
+      output({ sessions: [session({ costUSD: 10, startTime: '2026-08-10T20:00:00.000Z' })] }),
+    );
+    assert.equal(justPast.offHoursShare, 100);
+  });
+
+  // Sat/Sun is not the weekend everywhere. Israel, most of the Gulf and others
+  // work Sun-Thu, which would file every Sunday session as off-hours and miss
+  // Friday entirely — on exactly the machine whose local clock is being read.
+  it('honours a caller-supplied weekend, so Sunday can be a working day', () => {
+    const sessions = [
+      // Sunday 14:00 UTC — weekend under the default, a working day under Fri/Sat.
+      session({ id: 'sunday', costUSD: 50, startTime: '2026-08-16T14:00:00.000Z' }),
+      // Friday 14:00 UTC — a working day under the default, weekend under Fri/Sat.
+      session({ id: 'friday', costUSD: 50, startTime: '2026-08-14T14:00:00.000Z' }),
+    ];
+
+    const dflt = summarizeWindow(output({ sessions }));
+    assert.equal(dflt.offHoursShare, 50, 'default weekend should count only Sunday');
+
+    const israeli = summarizeWindow(output({ sessions }), { weekendDays: [5, 6] });
+    assert.equal(israeli.offHoursShare, 50, 'Fri/Sat weekend should count only Friday');
+
+    // The two must not agree by accident: check which session was counted.
+    const sundayOnly = summarizeWindow(output({ sessions: [sessions[0]] }), {
+      weekendDays: [5, 6],
+    });
+    assert.equal(sundayOnly.offHoursShare, 0, 'Sunday is a working day under Fri/Sat');
+  });
+});
+
+describe('parseWeekendDays', () => {
+  it('reads three-letter day names, case and order insensitive', () => {
+    assert.deepEqual(parseWeekendDays('fri,sat'), [5, 6]);
+    assert.deepEqual(parseWeekendDays('SAT, SUN'), [0, 6]);
+    assert.deepEqual(parseWeekendDays('sun'), [0]);
+  });
+
+  it('accepts an explicitly empty weekend', () => {
+    assert.deepEqual(parseWeekendDays('none'), []);
+  });
+
+  it('refuses a name it does not recognise rather than dropping it', () => {
+    // Silently ignoring a typo would report an off-hours share computed from a
+    // weekend the person did not ask for, and nothing downstream could detect it.
+    assert.throws(() => parseWeekendDays('fri,satrday'), /satrday/);
+    assert.throws(() => parseWeekendDays(''), /weekend/i);
+  });
+
+  it('surfaces the subagent token share from the run summary, as a percentage', () => {
+    const window = summarizeWindow(output({ sidechainTokenShare: 0.42 }));
+    assert.equal(window.subagentTokenShare, 42);
+  });
+
+  it('shares sessions that hit the auto-compact wall, separately from no-compact', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', compaction: 'auto' }),
+          session({ id: 'b', compaction: 'manual' }),
+          session({ id: 'c', compaction: 'none', flags: ['no-compaction'] }),
+          session({ id: 'd', compaction: 'none' }),
+        ],
+      }),
+    );
+    assert.equal(window.autoCompactionShare, 25);
+  });
+
+  it('shares sessions with any repeated same-file edit', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', reworkEdits: 3 }),
+          session({ id: 'b', reworkEdits: 0 }),
+          session({ id: 'c', reworkEdits: 0 }),
+          session({ id: 'd', reworkEdits: 0 }),
+        ],
+      }),
+    );
+    assert.equal(window.reworkShare, 25);
+  });
+});
+
+// --- verdicts ---------------------------------------------------------------
+
+describe('scorecard', () => {
+  const withPerPrompt = (cost: number, prompts: number, range: DateRange) =>
+    summarizeWindow(output({ sessions: [session({ costUSD: cost, prompts })], range }));
+
+  const current = { from: '2026-08-10', to: '2026-08-16' };
+  const prior = { from: '2026-08-03', to: '2026-08-09' };
+
+  it('reads a sub-5% move as flat rather than booking it as a win', () => {
+    const rows = scorecard(
+      withPerPrompt(98, 100, current),
+      withPerPrompt(100, 100, prior),
+    );
+    assert.equal(rows[0].measure, 'Consumption per prompt');
+    assert.equal(rows[0].verdict, 'flat');
+  });
+
+  it('separates better from much better at 25%', () => {
+    assert.equal(
+      scorecard(withPerPrompt(90, 100, current), withPerPrompt(100, 100, prior))[0].verdict,
+      'better',
+    );
+    assert.equal(
+      scorecard(withPerPrompt(70, 100, current), withPerPrompt(100, 100, prior))[0].verdict,
+      'much better',
+    );
+  });
+
+  it('calls a rise worse', () => {
+    assert.equal(
+      scorecard(withPerPrompt(130, 100, current), withPerPrompt(100, 100, prior))[0].verdict,
+      'worse',
+    );
+  });
+
+  it('reads no-baseline for every row without a prior window', () => {
+    const rows = scorecard(withPerPrompt(100, 100, current), null);
+    assert.ok(rows.every((row) => row.verdict === 'no-baseline'));
+    assert.ok(rows.every((row) => row.prior === null));
+  });
+
+  it('reads a rise off a zero baseline as worse, and zero-to-zero as flat', () => {
+    const withCold = (extra: number, range: DateRange) =>
+      summarizeWindow(
+        output({ range, sessions: [session({ costUSD: 100, prompts: 100, coldStartExtraUSD: extra })] }),
+      );
+    const measure = 'Cold-start premium, share of total';
+    assert.equal(
+      scorecard(withCold(5, current), withCold(0, prior)).find((r) => r.measure === measure)!
+        .verdict,
+      'worse',
+    );
+    assert.equal(
+      scorecard(withCold(0, current), withCold(0, prior)).find((r) => r.measure === measure)!
+        .verdict,
+      'flat',
+    );
+  });
+
+  it('treats a rising cache-read share as better, not worse', () => {
+    const row = scorecard(
+      summarizeWindow(output({ range: current, cacheReadRatio: 0.98 })),
+      summarizeWindow(output({ range: prior, cacheReadRatio: 0.8 })),
+    ).find((r) => r.measure === 'Cache-read share of input tokens')!;
+    assert.equal(row.verdict, 'better');
+  });
+
+  it('treats a rising subagent delegation share as better, not worse', () => {
+    const row = scorecard(
+      summarizeWindow(output({ range: current, sidechainTokenShare: 0.24 })),
+      summarizeWindow(output({ range: prior, sidechainTokenShare: 0.2 })),
+    ).find((r) => r.measure === 'Subagent delegation, share of input tokens')!;
+    assert.equal(row.verdict, 'better');
+  });
+
+  it('treats a rising off-hours share as worse, not better', () => {
+    const row = scorecard(
+      summarizeWindow(
+        output({ range: current, sessions: [session({ costUSD: 10, startTime: '2026-08-10T23:00:00.000Z' })] }),
+      ),
+      summarizeWindow(
+        output({ range: prior, sessions: [session({ costUSD: 10, startTime: '2026-08-03T09:00:00.000Z' })] }),
+      ),
+    ).find((r) => r.measure === 'Off-hours share (nights + weekends)')!;
+    assert.equal(row.verdict, 'worse');
+  });
+});
+
+describe('headline', () => {
+  const window = (cost: number, prompts: number, range: DateRange) =>
+    summarizeWindow(output({ sessions: [session({ costUSD: cost, prompts })], range }));
+  const cur = { from: '2026-08-10', to: '2026-08-16' };
+  const pri = { from: '2026-08-03', to: '2026-08-09' };
+
+  it('calls extra usage volume when per-prompt held flat', () => {
+    const found = headline(window(150, 150, cur), window(100, 100, pri));
+    assert.equal(found.finding, 'volume');
+    assert.match(found.why, /the rise is workload/);
+  });
+
+  it('calls it a habit when cost grew faster than volume', () => {
+    const found = headline(window(150, 100, cur), window(100, 100, pri));
+    assert.equal(found.finding, 'efficiency-regression');
+  });
+
+  it('refuses to pick when nothing dominates', () => {
+    assert.equal(headline(window(103, 101, cur), window(100, 100, pri)).finding, 'mixed');
+  });
+
+  it('says habits cannot be tracked from one window', () => {
+    assert.equal(headline(window(100, 100, cur), null).finding, 'single-window');
+  });
+
+  it('holds the volume branch at its exact thresholds', () => {
+    // 10% more prompts is not yet "more work" — the branch needs > 10.
+    assert.equal(headline(window(110, 110, cur), window(100, 100, pri)).finding, 'mixed');
+    // 11% more prompts at exactly +2% per-prompt is: the boundary is inclusive.
+    assert.equal(headline(window(113.22, 111, cur), window(100, 100, pri)).finding, 'volume');
+  });
+
+  it('holds the regression branch at its exact threshold', () => {
+    // Exactly +5% per-prompt is not yet a habit; the branch needs > 5.
+    assert.equal(headline(window(105, 100, cur), window(100, 100, pri)).finding, 'mixed');
+    assert.equal(
+      headline(window(106, 100, cur), window(100, 100, pri)).finding,
+      'efficiency-regression',
+    );
+  });
+
+  it('says n/a rather than "null%" when a window ran no prompts', () => {
+    const empty = summarizeWindow(output({ range: cur, sessions: [] }));
+    const found = headline(empty, window(100, 100, pri));
+    assert.equal(found.finding, 'mixed');
+    assert.doesNotMatch(found.why, /null/);
+    assert.match(found.why, /per-prompt n\/a/);
+  });
+});
+
+// --- levers -----------------------------------------------------------------
+
+describe('levers', () => {
+  it('sizes the model-mix gap and aims at a third of the ceiling', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'o', primaryModel: 'claude-opus-4-6', costUSD: 300, prompts: 100 }),
+          session({ id: 's', primaryModel: 'claude-sonnet-4-5', costUSD: 100, prompts: 100 }),
+        ],
+      }),
+    );
+    const lever = levers(window).find((l) => l.lever === 'model-mix')!;
+    assert.equal(lever.ratio, 3);
+    assert.equal(lever.ceiling, 200);
+    assert.equal(lever.realistic, 66.67);
+  });
+
+  it('needs two large project cohorts before quoting a project floor', () => {
+    const thin = summarizeWindow(
+      output({ byProject: [project('a', 300, 100), project('b', 100, 100)] }),
+    );
+    assert.equal(
+      thin.byProject.length >= 2 && levers(thin).some((l) => l.lever === 'project-floor'),
+      false,
+    );
+
+    const large = summarizeWindow(
+      output({
+        sessions: [session({ costUSD: 400, prompts: 600 })],
+        byProject: [project('pricey', 300, 200), project('cheap', 100, 400)],
+      }),
+    );
+    const lever = levers(large).find((l) => l.lever === 'project-floor')!;
+    assert.equal(lever.ceiling, 250);
+  });
+});
+
+// --- refusals ---------------------------------------------------------------
+
+describe('validateWindowPair', () => {
+  const window = (range: DateRange, daysCovered?: number) =>
+    summarizeWindow(output({ range, daysCovered }));
+
+  it('refuses an unequal pair, because the deltas would measure the window', () => {
+    assert.throws(
+      () =>
+        validateWindowPair(
+          window({ from: '2026-08-10', to: '2026-08-16' }),
+          window({ from: '2026-07-11', to: '2026-08-09' }),
+        ),
+      (err: unknown) => {
+        assert.ok(err instanceof HabitsRefusal);
+        assert.match(err.message, /unequal windows: current spans 7 days/);
+        return true;
+      },
+    );
+  });
+
+  it('refuses an overlapping pair, because a session is compared against itself', () => {
+    assert.throws(
+      () =>
+        validateWindowPair(
+          window({ from: '2026-08-10', to: '2026-08-16' }),
+          window({ from: '2026-08-04', to: '2026-08-10' }),
+        ),
+      /overlapping windows/,
+    );
+  });
+
+  it('warns, but does not refuse, when days go unmeasured between the windows', () => {
+    const warnings = validateWindowPair(
+      window({ from: '2026-08-10', to: '2026-08-16' }),
+      window({ from: '2026-08-01', to: '2026-08-07' }),
+    );
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /2 day\(s\) unmeasured/);
+  });
+
+  it('accepts a Monday-to-Friday pair — weekends are not sparsity', () => {
+    const warnings = validateWindowPair(
+      window({ from: '2026-08-10', to: '2026-08-16' }, 5),
+      window({ from: '2026-08-03', to: '2026-08-09' }, 5),
+    );
+    assert.deepEqual(warnings, []);
+  });
+
+  it('refuses lopsided coverage and names a shorter length', () => {
+    assert.throws(
+      () =>
+        validateWindowPair(
+          window({ from: '2026-07-18', to: '2026-08-16' }, 26),
+          window({ from: '2026-06-18', to: '2026-07-17' }, 11),
+        ),
+      (err: unknown) => {
+        assert.ok(err instanceof HabitsRefusal);
+        assert.match(err.message, /lopsided coverage/);
+        assert.match(err.advice, /Re-run with a shorter length \(try 13d\)/);
+        return true;
+      },
+    );
+  });
+
+  it('refuses two entirely empty windows, which the asymmetry check cannot see', () => {
+    assert.throws(
+      () =>
+        validateWindowPair(
+          window({ from: '2026-08-10', to: '2026-08-16' }, 0),
+          window({ from: '2026-08-03', to: '2026-08-09' }, 0),
+        ),
+      /window too sparse/,
+    );
+  });
+
+  it('refuses a pair where both windows are equally empty', () => {
+    assert.throws(
+      () =>
+        validateWindowPair(
+          window({ from: '2026-07-18', to: '2026-08-16' }, 8),
+          window({ from: '2026-06-18', to: '2026-07-17' }, 7),
+        ),
+      /window too sparse/,
+    );
+  });
+});
+
+// --- the whole report -------------------------------------------------------
+
+describe('buildHabitsReport', () => {
+  const current = { from: '2026-08-10', to: '2026-08-16' };
+  const prior = { from: '2026-08-03', to: '2026-08-09' };
+
+  it('carries the deltas, the headline and the caveats', () => {
+    const { report } = buildHabitsReport(
+      output({ range: current, sessions: [session({ costUSD: 120, prompts: 100 })] }),
+      output({ range: prior, sessions: [session({ costUSD: 100, prompts: 100 })] }),
+    );
+    assert.equal(report.generatedFrom, 'ccalyze');
+    assert.equal(report.delta!.cost, 20);
+    assert.equal(report.delta!.perPrompt, 20);
+    assert.equal(report.headline.finding, 'efficiency-regression');
+    assert.match(report.caveats.costIsNotional, /never as spend/);
+    assert.match(report.caveats.cleanCohort, /100% of prompts/);
+  });
+
+  it('describes one window without pretending to track it', () => {
+    const { report, warnings } = buildHabitsReport(output({ range: current }), null);
+    assert.equal(report.prior, null);
+    assert.equal(report.delta, null);
+    assert.equal(report.headline.finding, 'single-window');
+    assert.deepEqual(warnings, []);
+  });
+
+  it('labels the cost figure with --unit in both the report and each window', () => {
+    const { report } = buildHabitsReport(output({ range: current }), null, { unit: 'quota units' });
+    assert.equal(report.unit, 'quota units');
+    assert.equal(report.current.unit, 'quota units');
+  });
+
+  it('aliases a project label before it can be shared', () => {
+    const { report } = buildHabitsReport(
+      output({ range: current, byProject: [project('acme-migration', 10, 10)] }),
+      null,
+      { aliases: { 'acme-migration': 'customer-a' } },
+    );
+    assert.equal(report.current.byProject[0].project, 'customer-a');
+  });
+
+  it('redacts every project label, in both windows', () => {
+    const { report } = buildHabitsReport(
+      output({
+        range: current,
+        byProject: [project('acme', 20, 10), project('side-project', 10, 10)],
+      }),
+      output({ range: prior, byProject: [project('acme', 20, 10)] }),
+      { redactProjects: true },
+    );
+    assert.deepEqual(
+      report.current.byProject.map((row) => row.project),
+      ['project-1', 'project-2'],
+    );
+    assert.deepEqual(
+      report.prior!.byProject.map((row) => row.project),
+      ['project-1'],
+    );
+  });
+
+  it('lets --single-window through a coverage floor that would refuse a pair', () => {
+    // Deliberate: the floors exist to stop a nearly-empty PRIOR window from
+    // producing a false delta. With no prior there is no delta to falsify, and
+    // this mode exists precisely for a history too short to pair.
+    const { report } = buildHabitsReport(
+      output({ range: { from: '2026-07-18', to: '2026-08-16' }, daysCovered: 2 }),
+      null,
+    );
+    assert.equal(report.headline.finding, 'single-window');
+  });
+
+  it('redacts over an alias when both are asked for', () => {
+    const { report } = buildHabitsReport(
+      output({ range: current, byProject: [project('acme-migration', 10, 10)] }),
+      null,
+      { redactProjects: true, aliases: { 'acme-migration': 'customer-a' } },
+    );
+    assert.equal(report.current.byProject[0].project, 'project-1');
+  });
+
+  it('leaves a project named after an Object prototype key alone', () => {
+    const { report } = buildHabitsReport(
+      output({ range: current, byProject: [project('constructor', 10, 10)] }),
+      null,
+      { aliases: {} },
+    );
+    assert.equal(report.current.byProject[0].project, 'constructor');
+    assert.match(JSON.stringify(report.current.byProject[0]), /"project":"constructor"/);
+  });
+
+  it('refuses rather than reporting a pair it cannot compare', () => {
+    assert.throws(
+      () =>
+        buildHabitsReport(
+          output({ range: { from: '2026-08-10', to: '2026-08-16' } }),
+          output({ range: { from: '2026-07-11', to: '2026-08-09' } }),
+        ),
+      HabitsRefusal,
+    );
+  });
+});

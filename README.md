@@ -1,6 +1,6 @@
 # ccalyze
 
-Claude Code usage analyzer. Parses your local `~/.claude/` data to show costs, cache efficiency, anomalies, and optimization tips — and, with `--deep`, cost-aware behavioral insights about how you actually work.
+Claude Code usage analyzer. Parses your local `~/.claude/` data to show costs, cache efficiency, anomalies, and optimization tips — with `--deep`, cost-aware behavioral insights about how you actually work, and with `--habits`, whether a change you made to how you work actually held.
 
 Zero runtime dependencies. Reads local files only, never modifies them, never phones home.
 
@@ -47,6 +47,7 @@ ccalyze 30d                          # last 30 days
 ccalyze 2026-03-01 2026-03-15       # custom date range
 ccalyze today --json                 # raw JSON output
 ccalyze --deep                       # add the per-session behavioral index (see below)
+ccalyze --habits                     # compare the last 7 complete days with the 7 before (see below)
 ```
 
 ## What It Shows
@@ -86,6 +87,48 @@ suggestions* — where every claim is tied to a session and its real cost:
 
 Just ask Claude for "usage insights" (or run `ccalyze --deep --json` yourself). See
 `SKILL.md` → "Deep analysis & insights fusion" for the full contract.
+
+## `--habits`: is it a habit, or just more work?
+
+Everything above measures one window. `--habits` compares two — the last N **complete** days
+against the N complete days before them — because totals cannot tell "more work" apart from "a
+worse habit": both produce a bigger number and call for opposite responses.
+
+```bash
+ccalyze --habits        # 7 days vs. the 7 before (default)
+ccalyze 15d --habits    # 15 vs. 15
+ccalyze 30d --habits    # 30 vs. 30
+```
+
+The output is a findings document, not a usage summary: a `headline` naming which of the three
+explanations the data supports (`volume` — the extra usage is workload, nothing to fix;
+`efficiency-regression` — a habit; `mixed`), a `scorecard` of nine measures with a mechanical
+verdict each, `levers` sizing what is still on the table, and `caveats` that keep the figures
+honest. A sub-5% move reads `flat`, not `better` — a scorecard that books noise as a win stops
+being worth reading.
+
+Two things it deliberately refuses:
+
+- **A date range.** The window *length* is settable; the endpoints are not. ccalyze picks them,
+  ending **yesterday** — a window ending today pairs N−1 complete days plus however much of today
+  has happened against a prior window of N complete ones, so the deltas would depend on the clock.
+  And picking endpoints after seeing the numbers is how a comparison turns into an argument.
+- **A pair it cannot compare.** ccalyze only sees transcripts still on disk, so a 30-day window
+  asked for on 41 days of history comes back the right length and nearly empty; that once reported
+  a +11,661% cost delta and called it an efficiency regression. Lopsided or sparse coverage exits
+  non-zero and names a shorter length to retry with.
+
+Comparison flags, for when the report leaves the machine — project labels are directory names and
+routinely carry a customer or personal name:
+
+```bash
+ccalyze --habits --redact-projects          # every label becomes project-1, project-2, …
+ccalyze --habits --alias acme-migration=customer-a
+ccalyze --habits --unit "quota units"       # what to call the cost figure
+ccalyze --habits --top 5                    # projects in the table
+ccalyze --habits --weekend fri,sat          # Sun-Thu work week (default is sat,sun)
+ccalyze --habits --single-window            # first-ever run: describes habits, cannot track them
+```
 
 ## Optional: Terminal Visualizer
 

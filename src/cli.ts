@@ -8,8 +8,17 @@ import { discoverSessionFiles, mergeSessions } from './discovery.ts';
 import { aggregate, type EnrichedSession } from './aggregator.ts';
 import { detectAnomalies } from './anomalies.ts';
 import { generateTips } from './tips.ts';
-import type { DateRange } from './types.ts';
+import {
+  buildHabitsReport,
+  HabitsRefusal,
+  parseWeekendDays,
+  resolveHabitWindows,
+} from './habits.ts';
+import type { CcalyzeOutput, DateRange } from './types.ts';
 import { VERSION } from './version.ts';
+
+/** Default window length for --habits, in days. */
+export const HABITS_DEFAULT_LENGTH = 7;
 
 export interface ParsedArgs {
   rangeArg: string;
@@ -19,26 +28,146 @@ export interface ParsedArgs {
   deep: boolean;
   viz: boolean;
   version: boolean;
+  /** Compare the last N complete days against the N before them. */
+  habits: boolean;
+  /** Window LENGTH in days for --habits. The dates are never settable. */
+  habitsLength: number;
+  /** --habits without a prior window: describes habits, cannot track them. */
+  singleWindow: boolean;
+  /** What to call the cost figure in the habits report. */
+  unit?: string;
+  /** Projects in the habits project table. */
+  topProjects?: number;
+  /** `OLD=NEW` project-label renames for the habits report. */
+  aliases: Record<string, string>;
+  redactProjects: boolean;
+  /** Days counting as the weekend for the off-hours row, `0` = Sunday. */
+  weekendDays?: number[];
+}
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Read `--flag value` or `--flag=value`.
+ *
+ * @returns the value and how many argv entries it consumed
+ */
+function readValue(argv: string[], index: number, name: string): { value: string; used: number } {
+  const arg = argv[index];
+  const eq = arg.indexOf('=');
+  if (eq !== -1) return { value: arg.slice(eq + 1), used: 0 };
+  const next = argv[index + 1];
+  if (next === undefined) throw new Error(`${name} needs a value`);
+  return { value: next, used: 1 };
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const flags = { json: false, deep: false, viz: false, version: false };
+  const flags = {
+    json: false,
+    deep: false,
+    viz: false,
+    version: false,
+    habits: false,
+    singleWindow: false,
+    redactProjects: false,
+  };
+  const aliases: Record<string, string> = {};
   const positional: string[] = [];
+  let unit: string | undefined;
+  let topProjects: number | undefined;
+  let weekendDays: number[] | undefined;
 
-  for (const arg of argv) {
-    if (arg === '--json') flags.json = true;
-    else if (arg === '--deep') flags.deep = true;
-    else if (arg === '--viz') flags.viz = true;
-    else if (arg === '--version' || arg === '-v') flags.version = true;
-    else if (!arg.startsWith('--')) positional.push(arg);
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const name = arg.split('=')[0];
+    if (name === '--json') flags.json = true;
+    else if (name === '--deep') flags.deep = true;
+    else if (name === '--viz') flags.viz = true;
+    else if (name === '--version' || name === '-v') flags.version = true;
+    else if (name === '--habits') flags.habits = true;
+    else if (name === '--single-window') flags.singleWindow = true;
+    else if (name === '--redact-projects') flags.redactProjects = true;
+    else if (name === '--unit') {
+      const read = readValue(argv, i, '--unit');
+      i += read.used;
+      unit = read.value;
+    } else if (name === '--top') {
+      const read = readValue(argv, i, '--top');
+      i += read.used;
+      const parsed = Number(read.value);
+      if (!Number.isInteger(parsed) || parsed < 1) throw new Error(`--top needs a positive whole number, got ${read.value}`);
+      topProjects = parsed;
+    } else if (name === '--weekend') {
+      const read = readValue(argv, i, '--weekend');
+      i += read.used;
+      weekendDays = parseWeekendDays(read.value);
+    } else if (name === '--alias') {
+      const read = readValue(argv, i, '--alias');
+      i += read.used;
+      const eq = read.value.indexOf('=');
+      if (eq < 1) throw new Error(`--alias needs OLD=NEW, got ${read.value}`);
+      aliases[read.value.slice(0, eq)] = read.value.slice(eq + 1);
+    } else if (arg.startsWith('--')) {
+      // Refused, never ignored. A dropped flag is silent in both directions: the
+      // person believes `--redact-project` (singular typo) redacted their project
+      // labels and shares directory names, and the flag's *value* survives as a
+      // positional, so `--topp 2` reads as a 2-day window instead of the default 7.
+      throw new Error(`unknown option ${name}`);
+    } else positional.push(arg);
   }
 
-  if (positional.length === 2 && /^\d{4}-\d{2}-\d{2}$/.test(positional[0]) && /^\d{4}-\d{2}-\d{2}$/.test(positional[1])) {
-    return { rangeArg: 'custom', customFrom: positional[0], customTo: positional[1], ...flags };
+  const habitsLength = resolveHabitsLength(positional, flags.habits);
+
+  if (positional.length === 2 && DATE_RE.test(positional[0]) && DATE_RE.test(positional[1])) {
+    return {
+      rangeArg: 'custom',
+      customFrom: positional[0],
+      customTo: positional[1],
+      ...flags,
+      habitsLength,
+      unit,
+      topProjects,
+      aliases,
+      weekendDays,
+    };
   }
 
   const rangeArg = positional[0] ?? '7d';
-  return { rangeArg, ...flags };
+  return { rangeArg, ...flags, habitsLength, unit, topProjects, aliases, weekendDays };
+}
+
+/**
+ * The one knob --habits exposes: the window LENGTH.
+ *
+ * Endpoints are refused, not defaulted. Picking a date range after seeing the
+ * numbers is the way a habit comparison turns into an argument, and it is exactly
+ * what a length cannot do — both windows move together whatever N is.
+ */
+export function resolveHabitsLength(positional: string[], habits: boolean): number {
+  if (!habits) return HABITS_DEFAULT_LENGTH;
+
+  if (positional.length === 2 && DATE_RE.test(positional[0]) && DATE_RE.test(positional[1])) {
+    throw new Error(
+      '--habits takes a window LENGTH, not a date range.\n' +
+        'It picks the dates itself: the last N complete days against the N before them. ' +
+        'Pass 7d, 15d or 30d.',
+    );
+  }
+
+  const arg = positional[0];
+  if (arg === undefined) return HABITS_DEFAULT_LENGTH;
+
+  const match = arg.match(/^(\d+)d?$/);
+  if (!match) {
+    throw new Error(
+      `--habits does not understand the range "${arg}". Pass a length: 7d, 15d or 30d.`,
+    );
+  }
+  const length = parseInt(match[1], 10);
+  if (length < 2) {
+    throw new Error(`--habits needs a window of 2 days or more, got ${arg}.`);
+  }
+  return length;
 }
 
 export function resolveDateRange(rangeArg: string, customFrom?: string, customTo?: string): DateRange {
@@ -66,21 +195,27 @@ export function resolveDateRange(rangeArg: string, customFrom?: string, customTo
   return { from: from.toISOString().slice(0, 10), to: todayStr };
 }
 
-async function main() {
-  const args = parseArgs(process.argv.slice(2));
-
-  if (args.version) {
-    console.log(VERSION);
-    return;
-  }
-
-  const range = resolveDateRange(args.rangeArg, args.customFrom, args.customTo);
-
-  const claudeDir = resolve(homedir(), '.claude');
+/**
+ * Parse, aggregate and analyze one date range — the whole single-window run.
+ *
+ * Extracted so --habits can produce two windows through exactly the same path the
+ * normal run takes: a habit comparison is only as trustworthy as the two figures
+ * being identical in derivation, so there must be no second aggregation code path.
+ */
+export async function analyzeRange(
+  claudeDir: string,
+  range: DateRange,
+  deep: boolean,
+): Promise<CcalyzeOutput> {
   const from = new Date(range.from);
   const to = new Date(range.to);
+  // A UTC step, because `new Date('2026-08-10')` parses as UTC midnight. Stepping
+  // the *local* day across a DST transition makes the last day 23h or 25h long —
+  // harmless in a single-window run, but it would make one --habits window
+  // physically shorter than the other while both still span N dates, which is
+  // exactly the error validateWindowPair exists to refuse and cannot see.
   const toEnd = new Date(to);
-  toEnd.setDate(toEnd.getDate() + 1);
+  toEnd.setUTCDate(toEnd.getUTCDate() + 1);
 
   // Parse history
   const historyPath = resolve(claudeDir, 'history.jsonl');
@@ -128,7 +263,7 @@ async function main() {
   const mergedSessions = mergeSessions(sessions);
 
   // Aggregate
-  let output = aggregate(mergedSessions, history, range, args.deep);
+  const output = aggregate(mergedSessions, history, range, deep);
 
   // Detect anomalies
   output.anomalies = detectAnomalies(output);
@@ -136,11 +271,62 @@ async function main() {
   // Generate tips
   output.tips = generateTips(output);
 
+  return output;
+}
+
+/**
+ * Run the two-window habit comparison.
+ *
+ * Both windows are parsed independently rather than sliced out of one wider run:
+ * message-level date filtering is what keeps a session that straddles midnight
+ * from being counted in both, and it happens inside `analyzeRange`.
+ */
+async function runHabits(claudeDir: string, args: ParsedArgs): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  const windows = resolveHabitWindows(args.habitsLength, today);
+
+  const current = await analyzeRange(claudeDir, windows.current, args.deep);
+  const prior = args.singleWindow ? null : await analyzeRange(claudeDir, windows.prior, args.deep);
+
+  const { report, warnings } = buildHabitsReport(current, prior, {
+    unit: args.unit,
+    topProjects: args.topProjects,
+    aliases: args.aliases,
+    redactProjects: args.redactProjects,
+    weekendDays: args.weekendDays,
+  });
+
+  for (const warning of warnings) console.error(warning);
+  console.log(JSON.stringify(report, null, 2));
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+
+  if (args.version) {
+    console.log(VERSION);
+    return;
+  }
+
+  const claudeDir = resolve(homedir(), '.claude');
+
+  if (args.habits) {
+    await runHabits(claudeDir, args);
+    return;
+  }
+
+  const range = resolveDateRange(args.rangeArg, args.customFrom, args.customTo);
+  const output = await analyzeRange(claudeDir, range, args.deep);
+
   // Output
   console.log(JSON.stringify(output, null, 2));
 }
 
 main().catch(err => {
+  if (err instanceof HabitsRefusal) {
+    console.error(`ccalyze --habits refused this pair of windows:\n${err.message}`);
+    process.exit(1);
+  }
   console.error('ccalyze error:', err.message);
   process.exit(1);
 });

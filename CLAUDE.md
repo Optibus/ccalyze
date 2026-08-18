@@ -26,7 +26,23 @@ passes. Run `npm run verify` before claiming green.
 - `src/aggregator.ts` — rolls up parsed data into output schema
 - `src/anomalies.ts` — static anomaly rules
 - `src/tips.ts` — recommendation generator
-- `src/cli.ts` — entry point, arg parsing
+- `src/habits.ts` — two-window habit comparison (`--habits`): window summary, scorecard, headline,
+  savings levers, and the refusals that stop an uncomparable pair from being reported
+- `src/cli.ts` — entry point, arg parsing, `analyzeRange()` (one window, shared by both modes)
+
+## Two Modes, One Aggregation Path
+
+A normal run measures one window. `--habits` measures two adjacent windows of complete days and
+compares them, because totals cannot separate "more work" from "a worse habit". Both go through
+`analyzeRange()` — a habit comparison is only as trustworthy as the two figures being identical in
+derivation, so there must never be a second aggregation path.
+
+The window arithmetic lives in `habits.ts` (`resolveHabitWindows`), not in `resolveDateRange`: a
+habit window ends **yesterday** (the last complete day), while a normal range ends today. Those are
+different contracts on purpose, and merging them would silently bias every delta.
+
+Nothing in `habits.ts` touches the filesystem — it is pure functions over `CcalyzeOutput`, so the
+refusals and verdicts are testable without a transcript.
 
 ## Key Parsing Detail
 

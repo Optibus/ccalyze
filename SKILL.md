@@ -1,6 +1,6 @@
 ---
 name: ccalyze
-description: Analyze Claude Code usage patterns, cost, quota burn, and prompt-cache efficiency, and produce cost-aware behavioral insights about how you work. Use when user asks about token usage, costs, quota, spending, burn rate, rate limits, cache behaviour, wants usage insights, or wants to know how to improve how they use Claude Code. Triggers on: usage, cost, quota, spending, burn rate, tokens, ccalyze, insights, deep, insights fusion, how much did I use, why did I hit my limit, why was that so expensive, how do I improve my usage, what am I doing wrong, cache, cache hit rate, cache reads, cache misses, cache efficiency, why does my cache keep missing, cold start, context rebuild, why is my context being resent, does switching models cost me, is it cheaper to start a fresh session.
+description: Analyze Claude Code usage patterns, cost, quota burn, and prompt-cache efficiency, and produce cost-aware behavioral insights about how you work. Use when user asks about token usage, costs, quota, spending, burn rate, rate limits, cache behaviour, wants usage insights, or wants to know how to improve how they use Claude Code. Triggers on: usage, cost, quota, spending, burn rate, tokens, ccalyze, insights, deep, insights fusion, how much did I use, why did I hit my limit, why was that so expensive, how do I improve my usage, what am I doing wrong, cache, cache hit rate, cache reads, cache misses, cache efficiency, why does my cache keep missing, cold start, context rebuild, why is my context being resent, does switching models cost me, is it cheaper to start a fresh session, why do I keep hitting my limit, did my habit change work, am I getting more efficient, compare this week to last week, habit tracking, --habits.
 ---
 
 # ccalyze — Claude Code Usage Analyzer
@@ -70,6 +70,12 @@ $CC 30d --json --deep               # last 30 days + deep index
 `--deep` only *adds* a top-level `deep` object; everything in Steps 2-3 renders the same. It is
 strictly additive, so when in doubt on an open-ended question ("how's my usage?"), prefer `--deep` —
 the cost is one extra object in the JSON, and it unlocks Step 4.
+
+**When to use `--habits` instead.** Any *comparative* question — "why do I keep hitting the limit",
+"did the change I made work", "am I getting more efficient" — is Step 5, not this step. A single
+window cannot answer it, whatever range you pass. `--habits` replaces the range with a window
+length and emits a different document (a two-window comparison, not a usage summary), so don't
+combine it with the rendering in Steps 2-3.
 
 ### Step 2: Render the output
 
@@ -204,3 +210,15 @@ Fuse them:
 Guardrail: only read as many transcripts as the question needs (start with the top ~5 by cost).
 `transcripts` can point at 100MB+ files, and a session that used subagents heavily may list
 hundreds of them — target the reads rather than slurping everything.
+
+### Step 5: Habit tracking over time (`--habits`)
+
+Use `--habits` when the question is **"why do I keep hitting the limit?"** or **"did the habit I
+changed actually work?"** — anything comparative, or any request for recommendations that should
+be measurable later. Everything above describes one window; `--habits` compares two, and needs
+a lot more care to use correctly than Steps 1-4 do.
+
+Before running it, **Read `references/habits.md`** (next to this file) — it covers picking the
+window length, the refusal/warning cases, how to read the scorecard/headline/levers, and the
+common mistakes. Nothing here duplicates it, so skip both the flag and the read for any request
+Steps 1-4 already answer.

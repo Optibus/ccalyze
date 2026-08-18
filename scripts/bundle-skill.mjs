@@ -12,6 +12,9 @@
  *
  * Layout:
  *   SKILL.md            copied from the repo-root SKILL.md (source of truth)
+ *   references/*.md     copied from the repo-root references/ (source of truth) —
+ *                       SKILL.md sends the agent here for detail on a less-common
+ *                       step, read on demand instead of loaded on every trigger
  *   bin/*.js            compiled, dependency-free
  *   bin/package.json    {"type":"module"} — the built files are ESM, and without
  *                       this Node would treat a bare .js as CommonJS and fail.
@@ -20,7 +23,7 @@
  * cannot execute must never be committed.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, copyFileSync, writeFileSync, readdirSync, statSync, chmodSync } from 'node:fs';
+import { mkdirSync, rmSync, copyFileSync, writeFileSync, readdirSync, statSync, chmodSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,6 +53,17 @@ writeFileSync(resolve(bin, 'package.json'), '{"type":"module"}\n');
 chmodSync(resolve(bin, 'cli.js'), 0o755);
 copyFileSync(resolve(root, 'SKILL.md'), resolve(out, 'SKILL.md'));
 
+// references/ — read on demand by SKILL.md for a less-common step, so it must
+// ship in the bundle even though only SKILL.md itself was copied before.
+const referencesDir = resolve(root, 'references');
+const referencesOut = resolve(out, 'references');
+if (existsSync(referencesDir)) {
+  mkdirSync(referencesOut, { recursive: true });
+  for (const f of readdirSync(referencesDir).filter((f) => f.endsWith('.md'))) {
+    copyFileSync(resolve(referencesDir, f), resolve(referencesOut, f));
+  }
+}
+
 // Smoke test: the bundle must actually run, standalone, from an unrelated cwd.
 const cli = resolve(bin, 'cli.js');
 const version = execFileSync('node', [cli, '--version'], { cwd: '/', encoding: 'utf8' }).trim();
@@ -71,6 +85,9 @@ if (!probe.summary || typeof probe.summary.totalCostUSD !== 'number') {
 const files = [
   ...readdirSync(out).filter((f) => statSync(resolve(out, f)).isFile()).map((f) => [f, resolve(out, f)]),
   ...readdirSync(bin).map((f) => [`bin/${f}`, resolve(bin, f)]),
+  ...(existsSync(referencesDir)
+    ? readdirSync(referencesOut).map((f) => [`references/${f}`, resolve(referencesOut, f)])
+    : []),
 ];
 const total = files.reduce((n, [, p]) => n + statSync(p).size, 0);
 

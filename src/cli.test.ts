@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, resolveDateRange } from './cli.ts';
+import { HABITS_DEFAULT_LENGTH, parseArgs, resolveDateRange } from './cli.ts';
 
 describe('parseArgs', () => {
   it('defaults to 7d', () => {
@@ -58,6 +58,110 @@ describe('resolveDateRange', () => {
     const range = resolveDateRange('custom', '2026-03-01', '2026-03-15');
     assert.equal(range.from, '2026-03-01');
     assert.equal(range.to, '2026-03-15');
+  });
+});
+
+describe('parseArgs — habits', () => {
+  it('defaults to a 7-day window length', () => {
+    const args = parseArgs(['--habits']);
+    assert.equal(args.habits, true);
+    assert.equal(args.habitsLength, HABITS_DEFAULT_LENGTH);
+    assert.equal(args.singleWindow, false);
+  });
+
+  it('reads the length off the positional, with or without the d', () => {
+    assert.equal(parseArgs(['30d', '--habits']).habitsLength, 30);
+    assert.equal(parseArgs(['--habits', '15']).habitsLength, 15);
+  });
+
+  it('refuses a date range — the length is settable, the dates are not', () => {
+    assert.throws(
+      () => parseArgs(['2026-03-01', '2026-03-15', '--habits']),
+      /takes a window LENGTH, not a date range/,
+    );
+  });
+
+  it('refuses a range word it cannot read as a length', () => {
+    assert.throws(() => parseArgs(['today', '--habits']), /Pass a length/);
+  });
+
+  it('refuses a window no comparison could use', () => {
+    assert.throws(() => parseArgs(['1d', '--habits']), /2 days or more/);
+  });
+
+  it('leaves the length alone when --habits is absent', () => {
+    const args = parseArgs(['today']);
+    assert.equal(args.habits, false);
+    assert.equal(args.habitsLength, HABITS_DEFAULT_LENGTH);
+  });
+
+  it('parses --single-window', () => {
+    assert.equal(parseArgs(['--habits', '--single-window']).singleWindow, true);
+  });
+});
+
+describe('parseArgs — habits report options', () => {
+  it('reads a value as either --flag value or --flag=value', () => {
+    assert.equal(parseArgs(['--habits', '--unit', 'quota units']).unit, 'quota units');
+    assert.equal(parseArgs(['--habits', '--unit=quota']).unit, 'quota');
+    assert.equal(parseArgs(['--habits', '--top', '3']).topProjects, 3);
+    assert.equal(parseArgs(['--habits', '--top=3']).topProjects, 3);
+  });
+
+  it('collects repeated aliases', () => {
+    const args = parseArgs(['--habits', '--alias', 'a=one', '--alias=b=two']);
+    assert.deepEqual(args.aliases, { a: 'one', b: 'two' });
+  });
+
+  it('parses --weekend into day indices, both spellings', () => {
+    assert.deepEqual(parseArgs(['--habits', '--weekend', 'fri,sat']).weekendDays, [5, 6]);
+    assert.deepEqual(parseArgs(['--habits', '--weekend=fri,sat']).weekendDays, [5, 6]);
+    assert.deepEqual(parseArgs(['--habits', '--weekend', 'none']).weekendDays, []);
+  });
+
+  it('leaves weekendDays unset when --weekend is not passed, so the default applies', () => {
+    assert.equal(parseArgs(['--habits']).weekendDays, undefined);
+  });
+
+  it('refuses a --weekend day it does not recognise', () => {
+    assert.throws(() => parseArgs(['--habits', '--weekend', 'funday']), /funday/);
+  });
+
+  it('parses --redact-projects', () => {
+    assert.equal(parseArgs(['--habits', '--redact-projects']).redactProjects, true);
+  });
+
+  it('rejects a malformed alias rather than silently dropping it', () => {
+    assert.throws(() => parseArgs(['--habits', '--alias', 'nope']), /needs OLD=NEW/);
+    assert.throws(() => parseArgs(['--habits', '--alias', '=new']), /needs OLD=NEW/);
+  });
+
+  it('rejects a --top that is not a positive whole number', () => {
+    assert.throws(() => parseArgs(['--habits', '--top', '0']), /positive whole number/);
+    assert.throws(() => parseArgs(['--habits', '--top', 'eight']), /positive whole number/);
+  });
+
+  it('rejects a value-taking flag left without a value', () => {
+    assert.throws(() => parseArgs(['--habits', '--unit']), /--unit needs a value/);
+  });
+
+  it('refuses an unknown flag instead of dropping it', () => {
+    // A dropped flag is silent in the direction that matters: the person believes
+    // they redacted their project labels and ships directory names.
+    assert.throws(
+      () => parseArgs(['--habits', '--redact-project']),
+      /unknown option --redact-project/,
+    );
+  });
+
+  it('refuses a mistyped value-flag rather than reading its value as the length', () => {
+    assert.throws(() => parseArgs(['--habits', '--topp', '2']), /unknown option --topp/);
+  });
+
+  it('does not read a flag value as the window length', () => {
+    const args = parseArgs(['--habits', '--unit', '30d']);
+    assert.equal(args.unit, '30d');
+    assert.equal(args.habitsLength, HABITS_DEFAULT_LENGTH);
   });
 });
 
