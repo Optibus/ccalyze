@@ -63,7 +63,7 @@ function window_(overrides: Partial<HabitsWindow> = {}): HabitsWindow {
     ],
     byProject: [
       { project: 'armada', cost: 60, prompts: 250, perPrompt: 0.24 },
-      { project: 'ccalyze', cost: 20, prompts: 150, perPrompt: 0.13 },
+      { project: 'ccalyze', cost: 32.5, prompts: 250, perPrompt: 0.13 },
     ],
     anomalyCounts: {},
     tips: [],
@@ -369,6 +369,62 @@ describe('buildProse — figure captions', () => {
     assert.match(prose.modelCaption, /a 3× difference/);
   });
 
+  // An unfiltered max/min reaches for the thinnest row in the window: a real run
+  // compared a 4-prompt model against a 120-prompt one and called it a 7x gap
+  // while the lever beside it priced 10,718 prompts.
+  it('ignores cohorts under the prompt floor when two real ones exist', () => {
+    const prose = buildProse(
+      report_({
+        current: window_({
+          byModel: [
+            { model: 'sonnet-4-5', cost: 0.45, costShare: 1, prompts: 4, sessions: 1, perPrompt: 0.1129 },
+            { model: 'opus-5', cost: 60, costShare: 74, prompts: 1_000, sessions: 40, perPrompt: 0.06 },
+            { model: 'haiku-4-5', cost: 20, costShare: 25, prompts: 1_000, sessions: 20, perPrompt: 0.02 },
+          ],
+        }),
+      }),
+      { today: TODAY },
+    );
+    assert.match(prose.modelCaption, /opus-5 runs 0.06 units per prompt across 1,000 prompts/);
+    assert.match(prose.modelCaption, /haiku-4-5 runs 0.02 across 1,000/);
+    assert.doesNotMatch(prose.modelCaption, /sonnet-4-5/);
+    assert.doesNotMatch(prose.modelCaption, /anecdote/);
+  });
+
+  it('says the sample is thin rather than quoting a ratio that means nothing', () => {
+    const prose = buildProse(
+      report_({
+        current: window_({
+          byModel: [
+            { model: 'sonnet-4-5', cost: 0.45, costShare: 50, prompts: 4, sessions: 1, perPrompt: 0.1129 },
+            { model: 'haiku-4-5', cost: 0.45, costShare: 50, prompts: 120, sessions: 2, perPrompt: 0.016 },
+          ],
+        }),
+      }),
+      { today: TODAY },
+    );
+    assert.match(prose.modelCaption, /7.06× difference/);
+    assert.match(prose.modelCaption, /under the 200-prompt floor/);
+    assert.match(prose.modelCaption, /anecdote rather than a rate/);
+  });
+
+  it('applies the same floor to the project spread', () => {
+    const prose = buildProse(
+      report_({
+        current: window_({
+          byProject: [
+            { project: 'tab', cost: 1, prompts: 5, perPrompt: 0.9 },
+            { project: 'armada', cost: 60, prompts: 250, perPrompt: 0.24 },
+            { project: 'ccalyze', cost: 32.5, prompts: 250, perPrompt: 0.13 },
+          ],
+        }),
+      }),
+      { today: TODAY },
+    );
+    assert.doesNotMatch(prose.projectCaption, /tab/);
+    assert.match(prose.projectCaption, /armada runs 0.24/);
+  });
+
   it('does not invent a ratio when only one model is priced', () => {
     const prose = buildProse(
       report_({
@@ -385,7 +441,7 @@ describe('buildProse — figure captions', () => {
   it('reads the project spread as the achievable target', () => {
     const prose = buildProse(report_(), { today: TODAY });
     assert.match(prose.projectCaption, /armada runs 0.24 units per prompt over 250 prompts/);
-    assert.match(prose.projectCaption, /ccalyze runs 0.13 over 150/);
+    assert.match(prose.projectCaption, /ccalyze runs 0.13 over 250/);
     assert.doesNotMatch(prose.projectCaption, /stands in for it/);
   });
 

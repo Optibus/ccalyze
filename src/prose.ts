@@ -109,20 +109,32 @@ function heaviestBand(window: HabitsWindow) {
   );
 }
 
-/** The dearest and cheapest per-prompt model rows in the window, when both exist. */
-function modelSpread(window: HabitsWindow) {
-  const priced = window.byModel.filter((m) => m.perPrompt !== null);
-  if (priced.length < 2) return null;
-  const sorted = [...priced].sort((a, b) => b.perPrompt! - a.perPrompt!);
-  return { dear: sorted[0], cheap: sorted[sorted.length - 1] };
-}
+/**
+ * Prompts a cohort needs before its per-prompt rate is a rate rather than an
+ * accident of a handful of sessions — the floor `habits.ts` already applies when
+ * it sizes the project-floor lever.
+ */
+export const COHORT_PROMPT_FLOOR = 200;
 
-/** The dearest and cheapest per-prompt projects in the window, when both exist. */
-function projectSpread(window: HabitsWindow) {
-  const priced = window.byProject.filter((p) => p.perPrompt !== null);
-  if (priced.length < 2) return null;
-  const sorted = [...priced].sort((a, b) => b.perPrompt! - a.perPrompt!);
-  return { dear: sorted[0], cheap: sorted[sorted.length - 1] };
+/**
+ * The dearest and cheapest cohort by per-prompt rate.
+ *
+ * Cohorts under the prompt floor are set aside first, because an unfiltered
+ * max/min reaches straight for the thinnest row in the window: a real run
+ * compared a 4-prompt model against a 120-prompt one and called it a 7× gap,
+ * while the lever beside it priced 10,718 prompts. Where fewer than two cohorts
+ * clear the floor the thin rows come back anyway, flagged, so the caption can say
+ * the sample is thin instead of quoting the ratio as if it meant something.
+ */
+function spread<T extends { perPrompt: number | null; prompts: number }>(
+  rows: T[],
+): { dear: T; cheap: T; thin: boolean } | null {
+  const priced = rows.filter((row) => row.perPrompt !== null);
+  const solid = priced.filter((row) => row.prompts >= COHORT_PROMPT_FLOOR);
+  const pool = solid.length >= 2 ? solid : priced;
+  if (pool.length < 2) return null;
+  const sorted = [...pool].sort((a, b) => b.perPrompt! - a.perPrompt!);
+  return { dear: sorted[0], cheap: sorted[sorted.length - 1], thin: solid.length < 2 };
 }
 
 const HEADLINES: Record<HabitsReport['headline']['finding'], string> = {
@@ -397,16 +409,24 @@ function durationCaptionText(report: HabitsReport, unit: string): string {
   );
 }
 
+/** `— on a thin sample` where a cohort is under the prompt floor, else nothing. */
+function thinNote(thin: boolean): string {
+  return thin
+    ? ` Both cohorts are under the ${COHORT_PROMPT_FLOOR}-prompt floor, so read this as an ` +
+        'anecdote rather than a rate.'
+    : '';
+}
+
 function modelCaptionText(report: HabitsReport, unit: string): string {
-  const spread = modelSpread(report.current);
-  if (!spread) {
+  const pair = spread(report.current.byModel);
+  if (!pair) {
     const only = report.current.byModel.find((m) => m.perPrompt !== null);
     return only
       ? `Only ${only.model} is priced in this window, at ${only.perPrompt} ${unit} per prompt ` +
           `across ${n(only.prompts)} prompts — there is no second model here to compare it against.`
       : 'No model in this window carries a per-prompt rate.';
   }
-  const { dear, cheap } = spread;
+  const { dear, cheap, thin } = pair;
   const ratio = cheap.perPrompt ? Math.round((dear.perPrompt! / cheap.perPrompt) * 100) / 100 : null;
   return (
     `On this window's own work, ${dear.model} runs ${dear.perPrompt} ${unit} per prompt across ` +
@@ -414,23 +434,24 @@ function modelCaptionText(report: HabitsReport, unit: string): string {
     `${n(cheap.prompts)}` +
     (ratio ? ` — a ${ratio}× difference` : '') +
     '. A session runs more than one model, so these are per-session primary-model rates, ' +
-    'not a token-level split.'
+    `not a token-level split.${thinNote(thin)}`
   );
 }
 
 function projectCaptionText(report: HabitsReport, unit: string): string {
-  const spread = projectSpread(report.current);
+  const pair = spread(report.current.byProject);
   const stands = report.current.cleanCohortUsable
     ? ''
     : ' The clean-cohort split was unusable in this window, so this spread stands in for it.';
-  if (!spread) {
+  if (!pair) {
     return `Fewer than two projects in this window carry a per-prompt rate, so there is no spread to read.${stands}`;
   }
-  const { dear, cheap } = spread;
+  const { dear, cheap, thin } = pair;
   return (
     `${dear.project} runs ${dear.perPrompt} ${unit} per prompt over ${n(dear.prompts)} prompts and ` +
     `${cheap.project} runs ${cheap.perPrompt} over ${n(cheap.prompts)}. The cheap end is the ` +
-    `achievable target because it is the same person's own achieved rate, not a benchmark.${stands}`
+    `achievable target because it is the same person's own achieved rate, not a benchmark.` +
+    `${thinNote(thin)}${stands}`
   );
 }
 
