@@ -592,6 +592,71 @@ describe('levers', () => {
     assert.equal(lever.realistic, 66.67);
   });
 
+  // The expensive/cheap rows are picked by model NAME, not by rate, so nothing
+  // guarantees opus costs more per prompt — a window of short opus prompts against
+  // long sonnet ones inverts it. Reporting that as a negative saving presents a
+  // cost increase as headroom.
+  it('omits the model-mix lever when the expensive model is not costing more per prompt', () => {
+    const inverted = summarizeWindow(
+      output({
+        sessions: [
+          // opus: 100 prompts at 0.5 each. sonnet: 100 prompts at 2.0 each.
+          session({ id: 'o', primaryModel: 'claude-opus-4-6', costUSD: 50, prompts: 100 }),
+          session({ id: 's', primaryModel: 'claude-sonnet-4-5', costUSD: 200, prompts: 100 }),
+        ],
+      }),
+    );
+    const lever = levers(inverted).find((l) => l.lever === 'model-mix');
+    assert.equal(lever, undefined, 'a negative gap is not a saving and must not be offered as one');
+  });
+
+  // A zero cheap rate is the LARGEST possible gap, not the absence of one. A
+  // truthiness guard on perPrompt suppressed exactly the case worth reporting.
+  it('keeps the model-mix lever when the cheap model costs nothing per prompt', () => {
+    const freeCheap = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'o', primaryModel: 'claude-opus-4-6', costUSD: 300, prompts: 100 }),
+          session({ id: 's', primaryModel: 'claude-sonnet-4-5', costUSD: 0, prompts: 100 }),
+        ],
+      }),
+    );
+    const lever = levers(freeCheap).find((l) => l.lever === 'model-mix');
+    assert.ok(lever, 'a zero cheap rate is the biggest gap there is, not a missing one');
+    assert.equal(lever!.ceiling, 300);
+  });
+
+  // byModel has one row per model string, so opus-4-6 and opus-5 in the same
+  // window are two rows. Taking only the first silently priced the lever off part
+  // of the opus spend.
+  it('pools every variant of each model family rather than using the first row', () => {
+    const mixed = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'o1', primaryModel: 'claude-opus-4-6', costUSD: 200, prompts: 100 }),
+          session({ id: 'o2', primaryModel: 'claude-opus-5', costUSD: 100, prompts: 100 }),
+          session({ id: 's', primaryModel: 'claude-sonnet-4-5', costUSD: 100, prompts: 100 }),
+        ],
+      }),
+    );
+    const lever = levers(mixed).find((l) => l.lever === 'model-mix')!;
+    // opus pooled: 300 over 200 prompts = 1.5/prompt. sonnet: 1.0. gap = 0.5 * 200.
+    assert.equal(lever.ceiling, 100);
+    assert.equal(lever.ratio, 1.5);
+  });
+
+  it('omits the model-mix lever when the two rates are identical', () => {
+    const flat = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'o', primaryModel: 'claude-opus-4-6', costUSD: 100, prompts: 100 }),
+          session({ id: 's', primaryModel: 'claude-sonnet-4-5', costUSD: 100, prompts: 100 }),
+        ],
+      }),
+    );
+    assert.equal(levers(flat).find((l) => l.lever === 'model-mix'), undefined);
+  });
+
   it('needs two large project cohorts before quoting a project floor', () => {
     const thin = summarizeWindow(
       output({ byProject: [project('a', 300, 100), project('b', 100, 100)] }),

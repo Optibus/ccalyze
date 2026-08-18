@@ -343,9 +343,35 @@ function relabelProjects(window, options) {
  */
 export function levers(current) {
     const out = [];
-    const expensive = current.byModel.find((m) => m.model.startsWith('opus'));
-    const cheap = current.byModel.find((m) => m.model.startsWith('sonnet'));
-    if (expensive?.perPrompt && cheap?.perPrompt) {
+    // Pooled across variants, not the first matching row: byModel has one row per
+    // model string, so opus-4-6 and opus-5 in the same window are two rows and
+    // taking one priced the lever off part of the spend.
+    const family = (prefix) => {
+        const rows = current.byModel.filter((m) => m.model.startsWith(prefix));
+        if (!rows.length)
+            return null;
+        const cost = rows.reduce((sum, r) => sum + r.cost, 0);
+        const prompts = rows.reduce((sum, r) => sum + r.prompts, 0);
+        return {
+            model: rows.length === 1 ? rows[0].model : `${prefix} (${rows.length} variants)`,
+            cost: round(cost, 2),
+            costShare: pct(cost, current.cost),
+            prompts,
+            sessions: rows.reduce((sum, r) => sum + r.sessions, 0),
+            perPrompt: prompts ? round(cost / prompts, 4) : null,
+        };
+    };
+    const expensive = family('opus');
+    const cheap = family('sonnet');
+    // Rows are picked by model name, not by rate, so "expensive" is an assumption
+    // rather than a measurement: a window of short opus prompts against long sonnet
+    // ones inverts it. Without this guard the lever reports a negative ceiling and a
+    // ratio below 1 — a cost increase presented as available headroom.
+    // `!= null`, not truthiness: a cheap rate of exactly 0 is the LARGEST possible
+    // gap, and a truthy test suppressed precisely the case most worth reporting.
+    if (expensive?.perPrompt != null &&
+        cheap?.perPrompt != null &&
+        expensive.perPrompt > cheap.perPrompt) {
         const gap = (expensive.perPrompt - cheap.perPrompt) * expensive.prompts;
         out.push({
             lever: 'model-mix',

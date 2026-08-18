@@ -8,7 +8,6 @@ describe('parseArgs', () => {
     assert.equal(args.rangeArg, '7d');
     assert.equal(args.json, false);
     assert.equal(args.deep, false);
-    assert.equal(args.viz, false);
   });
 
   it('parses "today"', () => {
@@ -29,11 +28,49 @@ describe('parseArgs', () => {
   });
 
   it('parses flags', () => {
-    const args = parseArgs(['today', '--json', '--deep', '--viz']);
+    const args = parseArgs(['today', '--json', '--deep']);
     assert.equal(args.rangeArg, 'today');
     assert.equal(args.json, true);
     assert.equal(args.deep, true);
-    assert.equal(args.viz, true);
+  });
+
+  // --viz was accepted since v0.4.0 and never read by anything: it promised a
+  // visualisation that has never existed, and reported success for it. --json is
+  // the opposite kind of no-op and stays — the output really is always JSON.
+  it('refuses --viz, which never did anything', () => {
+    assert.throws(() => parseArgs(['today', '--viz']), /unknown option --viz/);
+  });
+
+  it('still accepts --json, whose promise the output actually keeps', () => {
+    assert.equal(parseArgs(['today', '--json']).json, true);
+  });
+
+  // The --  case was already refused; the single-dash half fell through to the
+  // positional list and was then read as the range, so `ccalyze -x` silently
+  // analysed a range named "-x" instead of saying it did not understand it.
+  it('refuses an unknown single-dash option instead of reading it as a range', () => {
+    assert.throws(() => parseArgs(['-x']), /unknown option -x/);
+    assert.throws(() => parseArgs(['-']), /unknown option -/);
+  });
+
+  it('still accepts the -v alias', () => {
+    assert.equal(parseArgs(['-v']).version, true);
+  });
+
+  // The widened guard is only safe because readValue consumes the following argv
+  // entry and the loop skips it. If that skip ever breaks, a value that happens to
+  // start with a dash starts being refused as an unknown option — so pin it.
+  it('accepts an option VALUE that begins with a dash', () => {
+    assert.equal(parseArgs(['--habits', '--unit', '-foo']).unit, '-foo');
+    assert.equal(parseArgs(['--habits', '--unit=-foo']).unit, '-foo');
+    assert.deepEqual(parseArgs(['--habits', '--alias', '-a=b']).aliases, { '-a': 'b' });
+  });
+
+  it('offers usage text for --help and -h rather than a bare unknown-option error', () => {
+    for (const flag of ['--help', '-h']) {
+      const args = parseArgs([flag]);
+      assert.equal(args.help, true, `${flag} should set help`);
+    }
   });
 });
 
@@ -58,6 +95,32 @@ describe('resolveDateRange', () => {
     const range = resolveDateRange('custom', '2026-03-01', '2026-03-15');
     assert.equal(range.from, '2026-03-01');
     assert.equal(range.to, '2026-03-15');
+  });
+
+  // The root the dash guard only half-closed: an unrecognised range used to fall
+  // through to a default 7-day window and exit 0, so a typo produced a perfectly
+  // plausible report for a period nobody asked for — undetectable in the output,
+  // because the output looks exactly like a deliberate `7d` run.
+  it('refuses an unrecognised range instead of silently defaulting to 7d', () => {
+    for (const bad of ['7dd', 'tody', 'last-week', 'banana', '2026-13-45', '']) {
+      assert.throws(
+        () => resolveDateRange(bad, undefined, undefined),
+        /range/i,
+        `expected "${bad}" to be refused`,
+      );
+    }
+  });
+
+  it('refuses "custom" without both endpoints rather than defaulting', () => {
+    assert.throws(() => resolveDateRange('custom', '2026-03-01', undefined), /range/i);
+    assert.throws(() => resolveDateRange('custom', undefined, undefined), /range/i);
+  });
+
+  it('still accepts every documented range form', () => {
+    assert.ok(resolveDateRange('today', undefined, undefined));
+    assert.ok(resolveDateRange('1d', undefined, undefined));
+    assert.ok(resolveDateRange('30d', undefined, undefined));
+    assert.ok(resolveDateRange('365d', undefined, undefined));
   });
 });
 
