@@ -29,6 +29,7 @@ describe('aggregate', () => {
           model: 'claude-opus-4-6',
           timestamp: '2026-03-29T11:00:00Z',
           isSidechain: false,
+          editedFiles: [],
           usage: { input_tokens: 100, output_tokens: 500, cache_creation_input_tokens: 10000, cache_read_input_tokens: 50000 },
         },
         {
@@ -37,6 +38,7 @@ describe('aggregate', () => {
           model: 'claude-opus-4-6',
           timestamp: '2026-03-29T17:30:00Z',
           isSidechain: false,
+          editedFiles: [],
           usage: { input_tokens: 200, output_tokens: 1000, cache_creation_input_tokens: 0, cache_read_input_tokens: 80000 },
         },
       ],
@@ -55,6 +57,7 @@ describe('aggregate', () => {
           model: 'claude-haiku-4-5-20251001',
           timestamp: '2026-03-29T17:15:00Z',
           isSidechain: false,
+          editedFiles: [],
           usage: { input_tokens: 50, output_tokens: 200, cache_creation_input_tokens: 5000, cache_read_input_tokens: 20000 },
         },
       ],
@@ -146,6 +149,85 @@ describe('aggregate', () => {
   });
 });
 
+describe('aggregate — compaction', () => {
+  const range: DateRange = { from: '2026-03-29', to: '2026-03-29' };
+
+  function longSession(over: Partial<SessionParseResult & { project: string; transcriptSizeMB: number }> = {}) {
+    return {
+      sessionId: 'sess-a',
+      project: 'proj',
+      startTime: '2026-03-29T10:00:00Z',
+      endTime: '2026-03-29T11:00:00Z',
+      transcriptSizeMB: 1,
+      promptCount: 40, // over the 30-prompt no-compaction floor
+      messages: [],
+      ...over,
+    };
+  }
+
+  it('classifies manual over auto when a session has both', () => {
+    const history: HistoryEntry[] = [
+      { display: '/compact', timestamp: Date.parse('2026-03-29T10:30:00Z'), project: 'p', sessionId: 'sess-a' },
+    ];
+    const result = aggregate([longSession({ autoCompactions: 2 })], history, range);
+    assert.equal(result.sessions[0].compaction, 'manual');
+    assert.equal(result.sessions[0].autoCompactions, 2);
+  });
+
+  it('classifies auto when only the wall was hit, and does not flag no-compaction', () => {
+    const result = aggregate([longSession({ autoCompactions: 1 })], [], range);
+    assert.equal(result.sessions[0].compaction, 'auto');
+    assert.ok(
+      !result.sessions[0].flags.includes('no-compaction'),
+      'a session that hit the auto-compact wall was not left unmanaged',
+    );
+  });
+
+  it('classifies none, and still flags no-compaction, when neither happened', () => {
+    const result = aggregate([longSession()], [], range);
+    assert.equal(result.sessions[0].compaction, 'none');
+    assert.ok(result.sessions[0].flags.includes('no-compaction'));
+  });
+
+  it('reads autoCompactions as 0 when the parser omits it (older transcripts)', () => {
+    const { autoCompactions, ...withoutField } = longSession();
+    const result = aggregate([withoutField], [], range);
+    assert.equal(result.sessions[0].autoCompactions, 0);
+    assert.equal(result.sessions[0].compaction, 'none');
+  });
+});
+
+describe('aggregate — rework', () => {
+  const range: DateRange = { from: '2026-03-29', to: '2026-03-29' };
+  const noUsage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+
+  function msg(requestId: string, editedFiles: string[]): ParsedMessage {
+    return {
+      requestId, sessionId: 'sess-a', model: 'opus', timestamp: '2026-03-29T10:00:00Z',
+      isSidechain: false, editedFiles, usage: noUsage,
+    };
+  }
+
+  it('counts extra edits to a file beyond its first, and not the first itself', () => {
+    const result = aggregate([{
+      sessionId: 'sess-a', project: 'p', startTime: '2026-03-29T10:00:00Z', endTime: '2026-03-29T11:00:00Z',
+      transcriptSizeMB: 1, promptCount: 1,
+      messages: [msg('r1', ['/a.ts']), msg('r2', ['/a.ts']), msg('r3', ['/a.ts']), msg('r4', ['/b.ts'])],
+    }], [], range);
+    // /a.ts edited 3x -> 2 extra; /b.ts edited 1x -> 0 extra.
+    assert.equal(result.sessions[0].reworkEdits, 2);
+  });
+
+  it('reads reworkEdits as 0 when every file was only edited once', () => {
+    const result = aggregate([{
+      sessionId: 'sess-a', project: 'p', startTime: '2026-03-29T10:00:00Z', endTime: '2026-03-29T11:00:00Z',
+      transcriptSizeMB: 1, promptCount: 1,
+      messages: [msg('r1', ['/a.ts']), msg('r2', ['/b.ts'])],
+    }], [], range);
+    assert.equal(result.sessions[0].reworkEdits, 0);
+  });
+});
+
 describe('buildDeepData', () => {
   const range: DateRange = { from: '2026-03-29', to: '2026-03-29' };
 
@@ -178,6 +260,9 @@ describe('buildDeepData', () => {
       cacheReadRatio: 0.96,
       coldStarts: 0,
       coldStartExtraUSD: 0,
+      compaction: 'none',
+      autoCompactions: 0,
+      reworkEdits: 0,
       ...over,
     };
   }
@@ -311,10 +396,10 @@ describe('buildDeepData', () => {
     it('counts switches, not messages', () => {
       const session = makeSession({
         messages: [
-          { requestId: 'r1', sessionId: 'sess-a', model: 'opus', timestamp: '2026-03-29T10:00:00Z', isSidechain: false, usage: noUsage },
-          { requestId: 'r2', sessionId: 'sess-a', model: 'opus', timestamp: '2026-03-29T10:05:00Z', isSidechain: false, usage: noUsage },
-          { requestId: 'r3', sessionId: 'sess-a', model: 'haiku', timestamp: '2026-03-29T10:10:00Z', isSidechain: false, usage: noUsage },
-          { requestId: 'r4', sessionId: 'sess-a', model: 'opus', timestamp: '2026-03-29T10:15:00Z', isSidechain: false, usage: noUsage },
+          { requestId: 'r1', sessionId: 'sess-a', model: 'opus', timestamp: '2026-03-29T10:00:00Z', isSidechain: false, editedFiles: [], usage: noUsage },
+          { requestId: 'r2', sessionId: 'sess-a', model: 'opus', timestamp: '2026-03-29T10:05:00Z', isSidechain: false, editedFiles: [], usage: noUsage },
+          { requestId: 'r3', sessionId: 'sess-a', model: 'haiku', timestamp: '2026-03-29T10:10:00Z', isSidechain: false, editedFiles: [], usage: noUsage },
+          { requestId: 'r4', sessionId: 'sess-a', model: 'opus', timestamp: '2026-03-29T10:15:00Z', isSidechain: false, editedFiles: [], usage: noUsage },
         ],
       });
       const deep = buildDeepData([session], [makeSummary()], []);
@@ -378,6 +463,7 @@ describe('computeColdStarts', () => {
     model: 'claude-opus-5',
     timestamp: new Date(Date.parse('2026-03-29T10:00:00Z') + minutesFromStart * 60_000).toISOString(),
     isSidechain: false,
+    editedFiles: [],
     usage: usage(cacheWrite),
   });
 
@@ -433,6 +519,7 @@ describe('aggregate — cache metrics', () => {
     model: 'claude-opus-5',
     timestamp: '2026-03-29T10:00:00Z',
     isSidechain: false,
+    editedFiles: [],
     usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
     ...over,
   });
@@ -486,6 +573,7 @@ describe('buildDeepData — main-thread churn', () => {
     model: 'claude-opus-5',
     timestamp: '2026-03-29T10:00:00Z',
     isSidechain: false,
+    editedFiles: [],
     usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
     ...over,
   });

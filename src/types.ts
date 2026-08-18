@@ -133,6 +133,26 @@ export interface SessionSummary {
    * rebuild.
    */
   coldStartExtraUSD: number;
+  /**
+   * Which kind of context compaction this session saw, if any: `manual` (a
+   * `/compact` entry in history.jsonl) beats `auto` (Claude Code compacted on
+   * its own after context filled up) beats `none`. A session could in theory
+   * see both; manual wins because it was a choice.
+   */
+  compaction: 'manual' | 'auto' | 'none';
+  /**
+   * Times this session auto-compacted. Zero on transcripts old enough to
+   * predate the field Claude Code stamps on the synthetic continuation
+   * message — reads as `none` above, same as a session that never filled up.
+   */
+  autoCompactions: number;
+  /**
+   * Extra edits to a file this session already edited — `Edit`/`Write`/
+   * `MultiEdit` tool calls beyond the first per file. Not a judgement on its
+   * own: plenty of iteration is normal. A session with a lot is worth reading
+   * for whether it was iterating or thrashing.
+   */
+  reworkEdits: number;
 }
 
 export interface CcalyzeOutput {
@@ -298,6 +318,13 @@ export interface HabitsWindow {
   perPrompt: number | null;
   /** `summary.cacheReadRatio` as a percentage, 0-100. */
   cacheReadShare: number;
+  /**
+   * `summary.sidechainTokenShare` as a percentage, 0-100 — share of input-side
+   * tokens spent inside subagents. Read as delegation, not friction: those
+   * tokens are read once in a clean context and never rejoin the window that
+   * gets resent on every later turn, so a rising share is the good direction.
+   */
+  subagentTokenShare: number;
   coldStart: {
     /** Summed `coldStartExtraUSD` — the avoidable premium, not the whole rebuild. */
     extra: number;
@@ -306,9 +333,33 @@ export interface HabitsWindow {
     sessions: number;
   };
   noCompactionShare: number;
+  /**
+   * Share of sessions that hit the auto-compact wall (`compaction === 'auto'`)
+   * rather than choosing to `/compact`. Hitting the wall means context ran out
+   * before the person acted on it — a friction signal `/compact`-share cannot
+   * see, since both currently read as "compacted".
+   */
+  autoCompactionShare: number;
+  /**
+   * Share of sessions with at least one repeated same-file edit
+   * (`reworkEdits > 0`). Not a judgement of the level — plenty of legitimate
+   * iteration looks the same — but a rising share across two windows is worth
+   * reading as friction.
+   */
+  reworkShare: number;
   longRunningSessions: number;
   /** Share of the window's cost carried by its three priciest sessions. */
   top3Share: number;
+  /**
+   * Share of the window's cost carried by sessions that *started* at night
+   * (local clock, before 08:00 or at/after 20:00) or on a Saturday/Sunday.
+   *
+   * Read off `SessionSummary.startTime` in the analysis machine's own local
+   * time zone — the only "local" a stored UTC timestamp can honestly recover,
+   * since Claude Code transcripts carry no time-zone field. That only holds
+   * if ccalyze runs on the same device/time zone the work happened in.
+   */
+  offHoursShare: number;
   flagged: HabitsCohort;
   clean: HabitsCohort;
   /**
@@ -403,6 +454,11 @@ export interface ParsedMessage {
    * Absent in older transcripts, in which case it reads as false.
    */
   isSidechain: boolean;
+  /**
+   * File paths this message's `Edit`/`Write`/`MultiEdit` tool_use blocks
+   * touched, for rework tracking. Empty when it made no such calls.
+   */
+  editedFiles: string[];
 }
 
 export interface HistoryEntry {

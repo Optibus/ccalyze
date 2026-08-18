@@ -1,5 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+
+// Off-hours detection reads the local clock (there is no time zone in a
+// transcript to read instead). Pin the suite to UTC so its verdict does not
+// depend on whatever time zone happens to run the tests.
+process.env.TZ = 'UTC';
 import {
   buildHabitsReport,
   HabitsRefusal,
@@ -11,6 +16,7 @@ import {
   scorecard,
   spanDays,
   summarizeWindow,
+  parseWeekendDays,
   validateWindowPair,
 } from './habits.ts';
 import type {
@@ -35,6 +41,10 @@ interface SessionSpec {
   costUSD?: number;
   flags?: SessionFlag[];
   coldStartExtraUSD?: number;
+  startTime?: string;
+  compaction?: SessionSummary['compaction'];
+  autoCompactions?: number;
+  reworkEdits?: number;
 }
 
 function session(spec: SessionSpec = {}): SessionSummary {
@@ -43,7 +53,9 @@ function session(spec: SessionSpec = {}): SessionSummary {
     name: spec.id ?? 's1',
     project: spec.project ?? 'proj-a',
     primaryModel: spec.primaryModel ?? 'claude-sonnet-4-5',
-    startTime: '2026-08-10T09:00:00.000Z',
+    // A Monday at 09:00 — deterministically on-hours regardless of the test
+    // machine's time zone, since the suite pins TZ=UTC below.
+    startTime: spec.startTime ?? '2026-08-10T09:00:00.000Z',
     endTime: '2026-08-10T10:00:00.000Z',
     durationMinutes: spec.durationMinutes ?? 60,
     prompts: spec.prompts ?? 10,
@@ -53,6 +65,9 @@ function session(spec: SessionSpec = {}): SessionSummary {
     cacheReadRatio: 0.95,
     coldStarts: spec.coldStartExtraUSD ? 1 : 0,
     coldStartExtraUSD: spec.coldStartExtraUSD ?? 0,
+    compaction: spec.compaction ?? 'none',
+    autoCompactions: spec.autoCompactions ?? 0,
+    reworkEdits: spec.reworkEdits ?? 0,
   };
 }
 
@@ -64,6 +79,7 @@ interface OutputSpec {
   byProject?: ProjectSummary[];
   anomalies?: Anomaly[];
   cacheReadRatio?: number;
+  sidechainTokenShare?: number;
 }
 
 /** A CcalyzeOutput whose summary is derived from its sessions, as a real run's is. */
@@ -92,7 +108,7 @@ function output(spec: OutputSpec = {}): CcalyzeOutput {
       totalSessions: sessions.length,
       totalPrompts: sessions.reduce((sum, s) => sum + s.prompts, 0),
       cacheReadRatio: spec.cacheReadRatio ?? 0.95,
-      sidechainTokenShare: 0,
+      sidechainTokenShare: spec.sidechainTokenShare ?? 0,
     },
     byDay,
     byModel: spec.byModel ?? {},
@@ -308,6 +324,115 @@ describe('summarizeWindow', () => {
       ['a', 'b'],
     );
   });
+
+  it('shares off-hours cost by session start, night and weekend both counting', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          // Monday 09:00 — on-hours.
+          session({ id: 'daytime', costUSD: 40, startTime: '2026-08-10T09:00:00.000Z' }),
+          // Monday 22:00 — night.
+          session({ id: 'night', costUSD: 30, startTime: '2026-08-10T22:00:00.000Z' }),
+          // Saturday 14:00 — weekend, even though the hour is daytime.
+          session({ id: 'weekend', costUSD: 30, startTime: '2026-08-15T14:00:00.000Z' }),
+        ],
+      }),
+    );
+    assert.equal(window.offHoursShare, 60);
+  });
+
+  it('reads 08:00 and 20:00 as the on-hours boundary, inclusive of neither night end', () => {
+    const atBoundary = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'open', costUSD: 50, startTime: '2026-08-10T08:00:00.000Z' }),
+          session({ id: 'close', costUSD: 50, startTime: '2026-08-10T19:59:00.000Z' }),
+        ],
+      }),
+    );
+    assert.equal(atBoundary.offHoursShare, 0);
+
+    const justPast = summarizeWindow(
+      output({ sessions: [session({ costUSD: 10, startTime: '2026-08-10T20:00:00.000Z' })] }),
+    );
+    assert.equal(justPast.offHoursShare, 100);
+  });
+
+  // Sat/Sun is not the weekend everywhere. Israel, most of the Gulf and others
+  // work Sun-Thu, which would file every Sunday session as off-hours and miss
+  // Friday entirely — on exactly the machine whose local clock is being read.
+  it('honours a caller-supplied weekend, so Sunday can be a working day', () => {
+    const sessions = [
+      // Sunday 14:00 UTC — weekend under the default, a working day under Fri/Sat.
+      session({ id: 'sunday', costUSD: 50, startTime: '2026-08-16T14:00:00.000Z' }),
+      // Friday 14:00 UTC — a working day under the default, weekend under Fri/Sat.
+      session({ id: 'friday', costUSD: 50, startTime: '2026-08-14T14:00:00.000Z' }),
+    ];
+
+    const dflt = summarizeWindow(output({ sessions }));
+    assert.equal(dflt.offHoursShare, 50, 'default weekend should count only Sunday');
+
+    const israeli = summarizeWindow(output({ sessions }), { weekendDays: [5, 6] });
+    assert.equal(israeli.offHoursShare, 50, 'Fri/Sat weekend should count only Friday');
+
+    // The two must not agree by accident: check which session was counted.
+    const sundayOnly = summarizeWindow(output({ sessions: [sessions[0]] }), {
+      weekendDays: [5, 6],
+    });
+    assert.equal(sundayOnly.offHoursShare, 0, 'Sunday is a working day under Fri/Sat');
+  });
+});
+
+describe('parseWeekendDays', () => {
+  it('reads three-letter day names, case and order insensitive', () => {
+    assert.deepEqual(parseWeekendDays('fri,sat'), [5, 6]);
+    assert.deepEqual(parseWeekendDays('SAT, SUN'), [0, 6]);
+    assert.deepEqual(parseWeekendDays('sun'), [0]);
+  });
+
+  it('accepts an explicitly empty weekend', () => {
+    assert.deepEqual(parseWeekendDays('none'), []);
+  });
+
+  it('refuses a name it does not recognise rather than dropping it', () => {
+    // Silently ignoring a typo would report an off-hours share computed from a
+    // weekend the person did not ask for, and nothing downstream could detect it.
+    assert.throws(() => parseWeekendDays('fri,satrday'), /satrday/);
+    assert.throws(() => parseWeekendDays(''), /weekend/i);
+  });
+
+  it('surfaces the subagent token share from the run summary, as a percentage', () => {
+    const window = summarizeWindow(output({ sidechainTokenShare: 0.42 }));
+    assert.equal(window.subagentTokenShare, 42);
+  });
+
+  it('shares sessions that hit the auto-compact wall, separately from no-compact', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', compaction: 'auto' }),
+          session({ id: 'b', compaction: 'manual' }),
+          session({ id: 'c', compaction: 'none', flags: ['no-compaction'] }),
+          session({ id: 'd', compaction: 'none' }),
+        ],
+      }),
+    );
+    assert.equal(window.autoCompactionShare, 25);
+  });
+
+  it('shares sessions with any repeated same-file edit', () => {
+    const window = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'a', reworkEdits: 3 }),
+          session({ id: 'b', reworkEdits: 0 }),
+          session({ id: 'c', reworkEdits: 0 }),
+          session({ id: 'd', reworkEdits: 0 }),
+        ],
+      }),
+    );
+    assert.equal(window.reworkShare, 25);
+  });
 });
 
 // --- verdicts ---------------------------------------------------------------
@@ -376,6 +501,26 @@ describe('scorecard', () => {
       summarizeWindow(output({ range: prior, cacheReadRatio: 0.8 })),
     ).find((r) => r.measure === 'Cache-read share of input tokens')!;
     assert.equal(row.verdict, 'better');
+  });
+
+  it('treats a rising subagent delegation share as better, not worse', () => {
+    const row = scorecard(
+      summarizeWindow(output({ range: current, sidechainTokenShare: 0.24 })),
+      summarizeWindow(output({ range: prior, sidechainTokenShare: 0.2 })),
+    ).find((r) => r.measure === 'Subagent delegation, share of input tokens')!;
+    assert.equal(row.verdict, 'better');
+  });
+
+  it('treats a rising off-hours share as worse, not better', () => {
+    const row = scorecard(
+      summarizeWindow(
+        output({ range: current, sessions: [session({ costUSD: 10, startTime: '2026-08-10T23:00:00.000Z' })] }),
+      ),
+      summarizeWindow(
+        output({ range: prior, sessions: [session({ costUSD: 10, startTime: '2026-08-03T09:00:00.000Z' })] }),
+      ),
+    ).find((r) => r.measure === 'Off-hours share (nights + weekends)')!;
+    assert.equal(row.verdict, 'worse');
   });
 });
 

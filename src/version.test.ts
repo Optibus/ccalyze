@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,6 +45,27 @@ describe('committed skill bundle (skills/ccalyze/)', () => {
     const source = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8');
     const bundled = readFileSync(new URL('../skills/ccalyze/SKILL.md', import.meta.url), 'utf8');
     assert.equal(bundled, source);
+  });
+
+  it('ships references/ identical to the repo-root source of truth', () => {
+    // SKILL.md sends the agent here for detail on a less-common step; a stale or
+    // missing copy in the bundle means that Read call fails for every real user,
+    // even though this describe block's other checks stay green.
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    const sourceDir = resolve(root, 'references');
+    const bundledDir = resolve(root, 'skills', 'ccalyze', 'references');
+    assert.ok(existsSync(sourceDir), 'references/ is missing at the repo root');
+    assert.ok(existsSync(bundledDir), 'skills/ccalyze/references/ is missing — re-run `npm run bundle-skill`');
+    const sourceFiles = readdirSync(sourceDir).filter((f) => f.endsWith('.md')).sort();
+    const bundledFiles = readdirSync(bundledDir).filter((f) => f.endsWith('.md')).sort();
+    assert.deepEqual(bundledFiles, sourceFiles, 'skills/ccalyze/references/ holds a different set of files');
+    for (const file of sourceFiles) {
+      assert.equal(
+        readFileSync(resolve(bundledDir, file), 'utf8'),
+        readFileSync(resolve(sourceDir, file), 'utf8'),
+        `skills/ccalyze/references/${file} is stale — re-run \`npm run bundle-skill\` and commit it`,
+      );
+    }
   });
 
   it('ships JS compiled from the current src/', () => {

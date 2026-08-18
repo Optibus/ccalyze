@@ -1,6 +1,6 @@
 {
   "name": "ccalyze",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Claude Code usage analyzer — costs, cache efficiency, anomalies, and cost-aware behavioral insights from your local ~/.claude/ data",
   "author": {
     "name": "Optibus",

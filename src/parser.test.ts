@@ -120,6 +120,80 @@ describe('parseSessionFile', () => {
     const byId = Object.fromEntries(result.messages.map((m) => [m.requestId, m.isSidechain]));
     assert.deepEqual(byId, { main: false, sub: true, 'explicit-main': false });
   });
+
+  it('counts an auto-compact continuation message, and does not count it as a prompt', async () => {
+    // Claude Code injects this synthetic type:"user" message when context
+    // fills up mid-session — it is not something the person typed.
+    const sessionFile = path.join(TMP, 'auto-compact.jsonl');
+    fs.writeFileSync(sessionFile, [
+      JSON.stringify({ type: 'user', sessionId: 's', timestamp: '2026-03-29T11:00:00Z', message: { role: 'user', content: 'real prompt' } }),
+      JSON.stringify({ type: 'user', sessionId: 's', timestamp: '2026-03-29T11:05:00Z', isCompactSummary: true, compactMetadata: {}, message: { role: 'user', content: 'This session is being continued...' } }),
+      JSON.stringify({ type: 'user', sessionId: 's', timestamp: '2026-03-29T11:06:00Z', message: { role: 'user', content: 'another real prompt' } }),
+    ].join('\n') + '\n');
+
+    const result = await parseSessionFile(sessionFile);
+    assert.equal(result.promptCount, 2, 'the synthetic continuation message must not count as a prompt');
+    assert.equal(result.autoCompactions, 1);
+  });
+
+  it('reads autoCompactions as 0 on a transcript that never auto-compacted', async () => {
+    const sessionFile = path.join(TMP, 'no-auto-compact.jsonl');
+    fs.writeFileSync(sessionFile, JSON.stringify({
+      type: 'user', sessionId: 's', timestamp: '2026-03-29T11:00:00Z', message: { role: 'user', content: 'hi' },
+    }) + '\n');
+
+    const result = await parseSessionFile(sessionFile);
+    assert.equal(result.autoCompactions, 0);
+  });
+
+  it('extracts file paths from Edit/Write/MultiEdit tool_use blocks, ignoring other tools', async () => {
+    const sessionFile = path.join(TMP, 'edits.jsonl');
+    const usage = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+    fs.writeFileSync(sessionFile, [
+      JSON.stringify({
+        type: 'assistant', requestId: 'r1', sessionId: 's', timestamp: '2026-03-29T11:00:00Z',
+        message: {
+          model: 'claude-opus-5', usage,
+          content: [
+            { type: 'tool_use', name: 'Read', input: { file_path: '/a.ts' } },
+            { type: 'tool_use', name: 'Edit', input: { file_path: '/a.ts' } },
+            { type: 'tool_use', name: 'Bash', input: { command: 'ls' } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: 'assistant', requestId: 'r2', sessionId: 's', timestamp: '2026-03-29T11:01:00Z',
+        message: {
+          model: 'claude-opus-5', usage,
+          content: [
+            { type: 'tool_use', name: 'MultiEdit', input: { file_path: '/b.ts' } },
+            { type: 'tool_use', name: 'Write', input: { file_path: '/c.ts' } },
+          ],
+        },
+      }),
+    ].join('\n') + '\n');
+
+    const result = await parseSessionFile(sessionFile);
+    const byId = Object.fromEntries(result.messages.map((m) => [m.requestId, m.editedFiles]));
+    assert.deepEqual(byId, { r1: ['/a.ts'], r2: ['/b.ts', '/c.ts'] });
+  });
+
+  it('keeps the fuller edited-files list across a streaming update, never clobbering with empty', async () => {
+    const sessionFile = path.join(TMP, 'edits-stream.jsonl');
+    const usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+    fs.writeFileSync(sessionFile, [
+      // Partial update: tool_use not yet in content.
+      JSON.stringify({ type: 'assistant', requestId: 'r1', sessionId: 's', timestamp: '2026-03-29T11:00:00Z', message: { model: 'claude-opus-5', usage, content: [] } }),
+      // Final update: full content.
+      JSON.stringify({
+        type: 'assistant', requestId: 'r1', sessionId: 's', timestamp: '2026-03-29T11:00:01Z',
+        message: { model: 'claude-opus-5', usage, content: [{ type: 'tool_use', name: 'Edit', input: { file_path: '/a.ts' } }] },
+      }),
+    ].join('\n') + '\n');
+
+    const result = await parseSessionFile(sessionFile);
+    assert.deepEqual(result.messages[0].editedFiles, ['/a.ts']);
+  });
 });
 
 describe('parseHistoryFile', () => {

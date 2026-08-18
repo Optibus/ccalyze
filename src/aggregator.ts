@@ -199,7 +199,14 @@ export function aggregate(
     // Per-message cost accumulation; also track per-model token usage for byDay
     const modelTokensInSession = new Map<string, { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number }>();
 
+    // File path -> edit count, for rework tracking.
+    const fileEditCounts = new Map<string, number>();
+
     for (const msg of session.messages) {
+      for (const file of msg.editedFiles) {
+        fileEditCounts.set(file, (fileEditCounts.get(file) ?? 0) + 1);
+      }
+
       const cost = computeCost(msg.model, msg.usage);
       sessionCost += cost;
       sessionInputTokens += msg.usage.input_tokens;
@@ -319,10 +326,22 @@ export function aggregate(
     const endMs = new Date(session.endTime).getTime();
     const durationMinutes = Math.round((endMs - startMs) / 60_000);
 
+    // Which kind of compaction this session saw, if any. Manual (a /compact
+    // entry in history.jsonl) wins over auto (Claude Code compacted on its
+    // own after context filled up) because it was a choice.
+    const autoCompactions = session.autoCompactions ?? 0;
+    const compaction: SessionSummary['compaction'] = compactedSessions.has(session.sessionId)
+      ? 'manual'
+      : autoCompactions > 0
+        ? 'auto'
+        : 'none';
+
     // Assign flags
     const flags: SessionFlag[] = [];
 
-    if (session.promptCount >= 30 && !compactedSessions.has(session.sessionId)) {
+    // A session that auto-compacted was NOT left unmanaged — it hit Claude
+    // Code's own wall. Only 'none' means nothing about context ever happened.
+    if (session.promptCount >= 30 && compaction === 'none') {
       flags.push('no-compaction');
     }
     if (durationMinutes > 180) {
@@ -336,6 +355,12 @@ export function aggregate(
     }
 
     const coldStarts = computeColdStarts(session.messages);
+
+    // Extra edits beyond the first per file — the first edit is normal work.
+    let reworkEdits = 0;
+    for (const count of fileEditCounts.values()) {
+      if (count > 1) reworkEdits += count - 1;
+    }
 
     sessionSummaries.push({
       id: session.sessionId,
@@ -355,6 +380,9 @@ export function aggregate(
       ),
       coldStarts: coldStarts.count,
       coldStartExtraUSD: coldStarts.extraUSD,
+      compaction,
+      autoCompactions,
+      reworkEdits,
     });
   }
 
