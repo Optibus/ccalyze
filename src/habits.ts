@@ -430,7 +430,11 @@ export function levers(current: HabitsWindow): HabitsLever[] {
 
   const expensive = current.byModel.find((m) => m.model.startsWith('opus'));
   const cheap = current.byModel.find((m) => m.model.startsWith('sonnet'));
-  if (expensive?.perPrompt && cheap?.perPrompt) {
+  // Rows are picked by model name, not by rate, so "expensive" is an assumption
+  // rather than a measurement: a window of short opus prompts against long sonnet
+  // ones inverts it. Without this guard the lever reports a negative ceiling and a
+  // ratio below 1 — a cost increase presented as available headroom.
+  if (expensive?.perPrompt && cheap?.perPrompt && expensive.perPrompt > cheap.perPrompt) {
     const gap = (expensive.perPrompt - cheap.perPrompt) * expensive.prompts;
     out.push({
       lever: 'model-mix',

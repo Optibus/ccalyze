@@ -592,6 +592,36 @@ describe('levers', () => {
     assert.equal(lever.realistic, 66.67);
   });
 
+  // The expensive/cheap rows are picked by model NAME, not by rate, so nothing
+  // guarantees opus costs more per prompt — a window of short opus prompts against
+  // long sonnet ones inverts it. Reporting that as a negative saving presents a
+  // cost increase as headroom.
+  it('omits the model-mix lever when the expensive model is not costing more per prompt', () => {
+    const inverted = summarizeWindow(
+      output({
+        sessions: [
+          // opus: 100 prompts at 0.5 each. sonnet: 100 prompts at 2.0 each.
+          session({ id: 'o', primaryModel: 'claude-opus-4-6', costUSD: 50, prompts: 100 }),
+          session({ id: 's', primaryModel: 'claude-sonnet-4-5', costUSD: 200, prompts: 100 }),
+        ],
+      }),
+    );
+    const lever = levers(inverted).find((l) => l.lever === 'model-mix');
+    assert.equal(lever, undefined, 'a negative gap is not a saving and must not be offered as one');
+  });
+
+  it('omits the model-mix lever when the two rates are identical', () => {
+    const flat = summarizeWindow(
+      output({
+        sessions: [
+          session({ id: 'o', primaryModel: 'claude-opus-4-6', costUSD: 100, prompts: 100 }),
+          session({ id: 's', primaryModel: 'claude-sonnet-4-5', costUSD: 100, prompts: 100 }),
+        ],
+      }),
+    );
+    assert.equal(levers(flat).find((l) => l.lever === 'model-mix'), undefined);
+  });
+
   it('needs two large project cohorts before quoting a project floor', () => {
     const thin = summarizeWindow(
       output({ byProject: [project('a', 300, 100), project('b', 100, 100)] }),

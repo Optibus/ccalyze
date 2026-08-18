@@ -31,7 +31,6 @@ export function parseArgs(argv) {
     const flags = {
         json: false,
         deep: false,
-        viz: false,
         version: false,
         habits: false,
         singleWindow: false,
@@ -49,8 +48,6 @@ export function parseArgs(argv) {
             flags.json = true;
         else if (name === '--deep')
             flags.deep = true;
-        else if (name === '--viz')
-            flags.viz = true;
         else if (name === '--version' || name === '-v')
             flags.version = true;
         else if (name === '--habits')
@@ -85,11 +82,16 @@ export function parseArgs(argv) {
                 throw new Error(`--alias needs OLD=NEW, got ${read.value}`);
             aliases[read.value.slice(0, eq)] = read.value.slice(eq + 1);
         }
-        else if (arg.startsWith('--')) {
+        else if (arg.startsWith('-')) {
             // Refused, never ignored. A dropped flag is silent in both directions: the
             // person believes `--redact-project` (singular typo) redacted their project
             // labels and shares directory names, and the flag's *value* survives as a
             // positional, so `--topp 2` reads as a 2-day window instead of the default 7.
+            //
+            // Single-dash too, not just `--`: no positional this CLI accepts begins with
+            // a dash (ranges are `7d`/`today`, custom ranges are two ISO dates), so `-x`
+            // reaching the positional list could only ever be read as a range named
+            // "-x" — a silent misread of something the person spelled wrong.
             throw new Error(`unknown option ${name}`);
         }
         else

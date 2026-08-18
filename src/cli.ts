@@ -24,9 +24,15 @@ export interface ParsedArgs {
   rangeArg: string;
   customFrom?: string;
   customTo?: string;
+  /**
+   * Accepted and intentionally not read: every mode already prints JSON, so the
+   * flag's promise is kept whether or not anything branches on it. It stays
+   * because it is the documented invocation throughout SKILL.md and the README.
+   * (`--viz` was the other kind of unread flag — it promised a visualisation that
+   * never existed — and is refused now rather than silently accepted.)
+   */
   json: boolean;
   deep: boolean;
-  viz: boolean;
   version: boolean;
   /** Compare the last N complete days against the N before them. */
   habits: boolean;
@@ -65,7 +71,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const flags = {
     json: false,
     deep: false,
-    viz: false,
     version: false,
     habits: false,
     singleWindow: false,
@@ -82,7 +87,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
     const name = arg.split('=')[0];
     if (name === '--json') flags.json = true;
     else if (name === '--deep') flags.deep = true;
-    else if (name === '--viz') flags.viz = true;
     else if (name === '--version' || name === '-v') flags.version = true;
     else if (name === '--habits') flags.habits = true;
     else if (name === '--single-window') flags.singleWindow = true;
@@ -107,11 +111,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const eq = read.value.indexOf('=');
       if (eq < 1) throw new Error(`--alias needs OLD=NEW, got ${read.value}`);
       aliases[read.value.slice(0, eq)] = read.value.slice(eq + 1);
-    } else if (arg.startsWith('--')) {
+    } else if (arg.startsWith('-')) {
       // Refused, never ignored. A dropped flag is silent in both directions: the
       // person believes `--redact-project` (singular typo) redacted their project
       // labels and shares directory names, and the flag's *value* survives as a
       // positional, so `--topp 2` reads as a 2-day window instead of the default 7.
+      //
+      // Single-dash too, not just `--`: no positional this CLI accepts begins with
+      // a dash (ranges are `7d`/`today`, custom ranges are two ISO dates), so `-x`
+      // reaching the positional list could only ever be read as a range named
+      // "-x" — a silent misread of something the person spelled wrong.
       throw new Error(`unknown option ${name}`);
     } else positional.push(arg);
   }
