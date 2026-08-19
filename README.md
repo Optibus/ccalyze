@@ -130,6 +130,32 @@ ccalyze --habits --weekend fri,sat          # Sun-Thu work week (default is sat,
 ccalyze --habits --single-window            # first-ever run: describes habits, cannot track them
 ```
 
+### The report page
+
+**Every `--habits` run writes one too** — the same findings as a self-contained HTML file:
+conclusion and recommendations first, then the scorecard, then the charts, then the reading notes.
+The JSON still goes to stdout unchanged, and the page path is printed on stderr:
+
+```bash
+ccalyze --habits 7d                              # page in ~/.claude/ccalyze/habits-FROM_TO.html
+ccalyze --habits 7d --html ~/usage-report.html   # or a path you choose
+ccalyze --habits 7d > findings.json              # page on disk, JSON captured
+ccalyze --habits 7d --no-html                    # JSON only, no page
+```
+
+Nothing in the page is fetched from anywhere: no CDN, no font host, no analytics. Every number
+renders from the findings JSON embedded in the file itself, and the prose is generated from that
+same object — so a paragraph can never contradict the table beside it.
+
+Ask the **`ccalyze` skill** in Claude Code ("why do I keep hitting my limit?") and you get a
+shareable claude.ai link rather than a path: the skill publishes that page with the Artifact tool
+and answers with the URL. Run the CLI bare in a terminal and you get the file, which is complete on
+its own — a standalone Node binary cannot talk to claude.ai, so publishing is always the agent's
+half of the job.
+
+**Check the project labels before sharing either form.** They are directory names; `--alias` and
+`--redact-projects` above apply to the page exactly as they do to the JSON.
+
 ## Optional: Terminal Visualizer
 
 Install [terminal-visualizer](https://github.com/gocodeweb/terminal-visualizer) for graphical charts in your terminal. ccalyze works without it (falls back to markdown tables).

@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { HABITS_DEFAULT_LENGTH, parseArgs, resolveDateRange } from './cli.ts';
+import {
+  defaultHabitsHtmlPath,
+  HABITS_DEFAULT_LENGTH,
+  parseArgs,
+  resolveDateRange,
+} from './cli.ts';
 
 describe('parseArgs', () => {
   it('defaults to 7d', () => {
@@ -160,6 +165,84 @@ describe('parseArgs — habits', () => {
 
   it('parses --single-window', () => {
     assert.equal(parseArgs(['--habits', '--single-window']).singleWindow, true);
+  });
+});
+
+describe('parseArgs — the report page', () => {
+  it('writes a page for --habits without being asked', () => {
+    const args = parseArgs(['--habits']);
+    assert.equal(args.html, true);
+    assert.equal(args.htmlPath, undefined, 'no explicit path means the default location');
+  });
+
+  it('takes an explicit path in either form', () => {
+    assert.equal(parseArgs(['--habits', '--html', 'report.html']).htmlPath, 'report.html');
+    assert.equal(parseArgs(['--habits', '--html=report.html']).htmlPath, 'report.html');
+    assert.equal(parseArgs(['--habits', '--html', '/tmp/out/x']).htmlPath, '/tmp/out/x');
+  });
+
+  it('leaves the path at the default when --html stands alone', () => {
+    const args = parseArgs(['--habits', '--html']);
+    assert.equal(args.html, true);
+    assert.equal(args.htmlPath, undefined);
+  });
+
+  it('does not swallow the window length as a path', () => {
+    // Silently writing the report to a file called "7d" AND analysing the default
+    // 7-day pair would be invisible in the output — the mistake this refuses.
+    assert.throws(() => parseArgs(['--habits', '--html', '7d']), /does not understand "7d" as a path/);
+  });
+
+  it('keeps the length when the flag comes after it', () => {
+    const args = parseArgs(['--habits', '15d', '--html', 'out.html']);
+    assert.equal(args.habitsLength, 15);
+    assert.equal(args.htmlPath, 'out.html');
+  });
+
+  it('leaves a following flag alone', () => {
+    const args = parseArgs(['--habits', '--html', '--redact-projects']);
+    assert.equal(args.htmlPath, undefined);
+    assert.equal(args.redactProjects, true);
+  });
+
+  it('refuses an empty --html=', () => {
+    assert.throws(() => parseArgs(['--habits', '--html=']), /--html= needs a path/);
+  });
+
+  it('turns the page off with --no-html', () => {
+    assert.equal(parseArgs(['--habits', '--no-html']).html, false);
+  });
+
+  it('refuses --html and --no-html together rather than picking one', () => {
+    assert.throws(() => parseArgs(['--habits', '--html', '--no-html']), /contradict each other/);
+  });
+
+  it('writes nothing for a normal run, and refuses either flag there', () => {
+    assert.equal(parseArgs(['7d']).html, true, 'the flag is habits-only; runHabits is the only reader');
+    assert.throws(() => parseArgs(['7d', '--html']), /--html applies to the --habits report/);
+    assert.throws(() => parseArgs(['7d', '--no-html']), /--no-html applies to the --habits report/);
+  });
+});
+
+describe('defaultHabitsHtmlPath', () => {
+  it('lands under ~/.claude/ccalyze, named for the window', () => {
+    assert.equal(
+      defaultHabitsHtmlPath({ from: '2026-08-11', to: '2026-08-17' }, '/home/dev'),
+      '/home/dev/.claude/ccalyze/habits-2026-08-11_2026-08-17.html',
+    );
+  });
+
+  // A run started inside a repo must never drop an untracked page next to the
+  // source, where it eventually reaches somebody's commit.
+  it('never writes into the working directory', () => {
+    const path = defaultHabitsHtmlPath({ from: '2026-08-11', to: '2026-08-17' }, '/home/dev');
+    assert.ok(path.startsWith('/home/dev/.claude/'));
+  });
+
+  it('does not overwrite the previous window', () => {
+    const a = defaultHabitsHtmlPath({ from: '2026-08-11', to: '2026-08-17' }, '/home/dev');
+    const b = defaultHabitsHtmlPath({ from: '2026-08-04', to: '2026-08-10' }, '/home/dev');
+    assert.notEqual(a, b);
   });
 });
 
