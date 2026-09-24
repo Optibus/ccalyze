@@ -525,9 +525,12 @@ function remeasureProse(report: HabitsReport, lengthDays: number, today: string)
     const aim = leverAim(lever);
     targets.push(`${aim.share}% of the window recovered from ${lever.lever}`);
   }
-  const correction = current.effectiveness?.correctionShare;
-  if (correction !== null && correction !== undefined) {
-    targets.push(`corrections at or under ${correction}% of instructions`);
+  // The better of the two windows: a correction share that rose is aimed back
+  // at where it was, never held at the worse level.
+  const corrections = [current.effectiveness?.correctionShare, prior?.effectiveness?.correctionShare]
+    .filter((v): v is number => typeof v === 'number');
+  if (corrections.length) {
+    targets.push(`corrections at or under ${Math.min(...corrections)}% of instructions`);
   }
 
   const sentence =

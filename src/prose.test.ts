@@ -175,6 +175,37 @@ describe('buildProse — effectiveness', () => {
   });
 });
 
+describe('buildProse — correction target', () => {
+  const eff = (correctionShare: number | null) => ({
+    instructions: 50, turnsPerInstruction: 10, perInstruction: 1,
+    correctionShare, interruptRate: 1, toolErrorShare: 1,
+  });
+
+  it('aims a risen correction share back at the prior level', () => {
+    const prose = buildProse(
+      report_({ current: window_({ effectiveness: eff(8) }), prior: window_({ effectiveness: eff(5) }) }),
+      { today: '2026-08-18' },
+    );
+    assert.match(prose.remeasure.targets, /corrections at or under 5% of instructions/);
+  });
+
+  it('holds an improved share at the current level', () => {
+    const prose = buildProse(
+      report_({ current: window_({ effectiveness: eff(3) }), prior: window_({ effectiveness: eff(5) }) }),
+      { today: '2026-08-18' },
+    );
+    assert.match(prose.remeasure.targets, /corrections at or under 3% of instructions/);
+  });
+
+  it('drops the target when neither window has a share', () => {
+    const prose = buildProse(
+      report_({ current: window_({ effectiveness: eff(null) }), prior: null }),
+      { today: '2026-08-18' },
+    );
+    assert.doesNotMatch(prose.remeasure.targets, /corrections at or under/);
+  });
+});
+
 describe('topLever', () => {
   it('picks the largest ceiling, not the first row', () => {
     assert.equal(topLever(report_({ levers: [PROJECT_LEVER, MODEL_LEVER] }))?.lever, 'model-mix');
