@@ -86,7 +86,7 @@ function row(
   verdict: HabitsVerdict,
   group: HabitsScorecardRow['group'] = 'consumption',
 ): HabitsScorecardRow {
-  return { measure, group, prior, current, verdict };
+  return { measure, group, prior, current, verdict, unit: '%', lowerIsBetter: true, target: '' };
 }
 
 const MODEL_LEVER: HabitsLever = {

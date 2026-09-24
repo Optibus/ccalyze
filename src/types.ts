@@ -452,6 +452,17 @@ export interface HabitsScorecardRow {
   prior: number | null;
   current: number | null;
   verdict: HabitsVerdict;
+  /** How `prior`/`current` are denominated — `%`, `per 100`, a count, or the report's cost unit. */
+  unit: string;
+  /** Whether a smaller number is the improvement. The page reads this into a ▼/▲ badge. */
+  lowerIsBetter: boolean;
+  /**
+   * What "good" looks like, in one short phrase. Grounded in a real number where one
+   * exists — a threshold already used elsewhere in ccalyze, or a definitional floor of
+   * zero for a count of bad events — never a made-up industry benchmark. Says so plainly
+   * when no such number exists rather than inventing one.
+   */
+  target: string;
 }
 
 /** A sized, independently-derived estimate of what is still on the table. */

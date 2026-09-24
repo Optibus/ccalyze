@@ -162,12 +162,14 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
   .tip{position:fixed;z-index:9;pointer-events:none;opacity:0;background:#2D1DA3;color:#fff;font-size:.74rem;padding:.45em .65em;border-radius:4px;transition:opacity .1s ease;max-width:270px;line-height:1.5;font-variant-numeric:tabular-nums}
   .tip.on{opacity:1}
   .tbl-scroll{overflow-x:auto;border:1px solid var(--rule);background:var(--panel);border-radius:4px}
-  table{border-collapse:collapse;width:100%;min-width:560px;font-size:.86rem}
+  table{border-collapse:collapse;width:100%;min-width:680px;font-size:.86rem}
   caption{text-align:left;font-size:.7rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);padding:var(--s3) var(--s4) var(--s2)}
   th,td{text-align:left;padding:.58rem var(--s4);border-top:1px solid var(--rule-2)}
   thead th{font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);border-top:none;border-bottom:1.5px solid var(--rule)}
   tbody th{font-weight:500;color:var(--ink)}
   td.num{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink-2);font-weight:500}
+  td.target{color:var(--ink-3);font-size:.82rem;max-width:26ch}
+  .dir{display:inline-block;color:var(--ink-3);font-size:.8em;cursor:help}
   tbody tr:hover{background:var(--panel-2)}
   .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:var(--s3) var(--s4)}
   .note{border-left:3px solid var(--rule);padding-left:var(--s3)}
@@ -234,6 +236,7 @@ ${prose.recommendations.map(recommendationHtml).join('\n')}
         <th scope="col">Measure</th>
         <th scope="col" class="num" data-f="prior.label"></th>
         <th scope="col" class="num" data-f="current.label"></th>
+        <th scope="col">What good looks like</th>
         <th scope="col">Reading</th>
       </tr></thead>
       <tbody id="scorecard"></tbody>
@@ -254,6 +257,7 @@ ${prose.recommendations.map(recommendationHtml).join('\n')}
         <th scope="col">Measure</th>
         <th scope="col" class="num" data-f="prior.label"></th>
         <th scope="col" class="num" data-f="current.label"></th>
+        <th scope="col">What good looks like</th>
         <th scope="col">Reading</th>
       </tr></thead>
       <tbody id="effectiveness"></tbody>
@@ -391,13 +395,21 @@ ${embedFindings(report)}
   // Scorecard.
   const chipFor = v => v === "worse" ? "no" : v === "flat" ? "nil"
     : v === "no-baseline" ? "nil" : "ok";
+  const withUnit = (v, u) => v === null || v === undefined ? "—" : \`\${v}\${u ? \` \${u}\` : ""}\`;
   // Two tables from one scorecard: a row without a group (a report written before
-  // groups existed) stays in the consumption table.
-  const rowHtml = r =>
-    \`<tr><th scope="row">\${r.measure}</th>
-      <td class="num">\${r.prior === null ? "—" : r.prior}</td>
-      <td class="num">\${r.current === null ? "—" : r.current}</td>
+  // groups existed) stays in the consumption table. Rows from an older report
+  // carry no unit/direction/target — fall back rather than print "undefined".
+  const rowHtml = r => {
+    const dir = r.lowerIsBetter === false
+      ? ["▲", "Higher is better"] : ["▼", "Lower is better"];
+    return \`<tr><th scope="row">
+        <span class="dir" title="\${dir[1]}" aria-label="\${dir[1]}">\${dir[0]}</span> \${r.measure}
+      </th>
+      <td class="num">\${withUnit(r.prior, r.unit)}</td>
+      <td class="num">\${withUnit(r.current, r.unit)}</td>
+      <td class="target">\${r.target || "—"}</td>
       <td><span class="chip \${chipFor(r.verdict)}">\${r.verdict}</span></td></tr>\`;
+  };
   document.getElementById("scorecard").innerHTML =
     D.scorecard.filter(r => r.group !== "effectiveness").map(rowHtml).join("");
   document.getElementById("effectiveness").innerHTML =
@@ -426,9 +438,11 @@ ${embedFindings(report)}
 
   document.getElementById("foot-range").textContent =
     pri ? \`Windows · \${fmtRange(pri)} and \${fmtRange(cur)}\` : \`Window · \${fmtRange(cur)}\`;
-  document.getElementById("foot-totals").textContent =
-    \`\${num(cur.sessions + (pri ? pri.sessions : 0))} sessions · \` +
-    \`\${num(cur.prompts + (pri ? pri.prompts : 0))} prompts\`;
+  // Both windows combined — not the current-window count shown in the stat tiles above,
+  // which is B only. Said explicitly here so the two numbers are never mistaken for a mismatch.
+  document.getElementById("foot-totals").textContent = pri
+    ? \`Both windows combined · \${num(cur.sessions + pri.sessions)} sessions · \${num(cur.prompts + pri.prompts)} prompts\`
+    : \`\${num(cur.sessions)} sessions · \${num(cur.prompts)} prompts\`;
 
   /* ---------- charts ---------- */
   const tip = document.getElementById("tip");

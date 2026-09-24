@@ -61,8 +61,8 @@ function report_(overrides: Partial<HabitsReport> = {}): HabitsReport {
     delta: { cost: 33.3, prompts: 0, perPrompt: 33.3, sessions: 0 },
     headline: { finding: 'volume', why: 'Cost tracked volume.' },
     scorecard: [
-      { measure: 'Consumption per prompt', group: 'consumption', prior: 0.2, current: 0.2, verdict: 'flat' },
-      { measure: 'Interrupts per 100 instructions', group: 'effectiveness', prior: 2, current: 4, verdict: 'worse' },
+      { measure: 'Consumption per prompt', group: 'consumption', prior: 0.2, current: 0.2, verdict: 'flat', unit: 'units', lowerIsBetter: true, target: 'No fixed target.' },
+      { measure: 'Interrupts per 100 instructions', group: 'effectiveness', prior: 2, current: 4, verdict: 'worse', unit: 'per 100', lowerIsBetter: true, target: '0 is ideal.' },
     ],
     levers: [],
     caveats: { costIsNotional: 'not money' },
