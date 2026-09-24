@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
-import type { ParsedMessage, HistoryEntry, RawUsage } from './types.ts';
+import type { ParsedMessage, HistoryEntry, RawUsage, Interaction } from './types.ts';
 
 /** Tool names whose `input.file_path` counts as an edit, for rework tracking. */
 const EDIT_TOOL_NAMES = new Set(['Edit', 'Write', 'MultiEdit']);
@@ -21,6 +21,82 @@ function extractEditedFiles(content: unknown): string[] {
   return files;
 }
 
+/**
+ * Opening words that push back on the previous turn.
+ *
+ * Anchored to the start of the instruction on purpose: "no" or "wrong" in the
+ * middle of a sentence is usually content ("there is no cache here"), while the
+ * same word leading the reply is usually a verdict on what Claude just did. It is
+ * a heuristic and it ships as one — it misses a polite correction and catches the
+ * odd "no rush, but…" — so the report only ever reads its direction across two
+ * windows, never its level.
+ */
+export const CORRECTION_RE = new RegExp(
+  '^(?:' +
+    [
+      'no\\b',
+      'nope\\b',
+      'wrong\\b',
+      'undo\\b',
+      'revert\\b',
+      'stop\\b',
+      'wait\\b',
+      'actually\\b',
+      'try again\\b',
+      "that'?s (?:not|wrong|incorrect)\\b",
+      "this is (?:not|wrong|incorrect)\\b",
+      "(?:it|that|this) (?:still )?(?:doesn'?t|didn'?t|isn'?t|is not|does not|did not) work",
+      'still (?:not|wrong|broken|failing|the same)\\b',
+      "you (?:didn'?t|did not|forgot|missed|broke|misunderstood)\\b",
+      'why did you\\b',
+      "not (?:what|quite|that)\\b",
+    ].join('|') +
+    ')',
+  'i',
+);
+
+/** Interrupt marker Claude Code writes as user text when the person presses Esc. */
+const INTERRUPT_PREFIX = '[Request interrupted by user';
+
+/**
+ * Classify one `type:"user"` transcript line into interaction events.
+ *
+ * A line carries either tool results (one event per block — parallel tool calls
+ * land in one line) or text. Text is an interrupt marker, a wrapper Claude Code
+ * injected (`<command-name>`, `<local-command-stdout>`, `<task-notification>`,
+ * …), or something the person typed. Only the last is an instruction.
+ *
+ * Subagent lines are dropped except for their tool results: the "user" text of a
+ * sidechain is the parent's Task prompt, written by Claude, not by the person.
+ */
+export function classifyUserLine(obj: any): Interaction['kind'][] {
+  if (obj.isMeta === true || obj.isCompactSummary === true) return [];
+  const content = obj.message?.content;
+
+  if (Array.isArray(content)) {
+    const results = content.filter((b: any) => b?.type === 'tool_result');
+    if (results.length) {
+      return results.map((b: any) => (b.is_error === true ? 'tool-error' : 'tool-ok'));
+    }
+  }
+  if (obj.isSidechain === true) return [];
+
+  const text = (
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+            .map((b: any) => b.text)
+            .join('\n')
+        : ''
+  ).trim();
+  if (!text) return [];
+  if (text.startsWith(INTERRUPT_PREFIX)) return ['interrupt'];
+  if (text.startsWith('<')) return [];
+  return [CORRECTION_RE.test(text) ? 'correction' : 'instruction'];
+}
+
 export interface SessionParseResult {
   sessionId: string;
   startTime: string;
@@ -35,6 +111,13 @@ export interface SessionParseResult {
    * predate the field, which reads as zero.
    */
   autoCompactions?: number;
+  /**
+   * Classified user-side events (typed instructions, corrections, interrupts,
+   * tool results). Kept per event with its timestamp so the date filter in
+   * `analyzeRange` applies to them exactly as it does to messages. Optional so
+   * a hand-built result without it reads as a session with no user events.
+   */
+  interactions?: Interaction[];
 }
 
 export async function parseSessionFile(filePath: string): Promise<SessionParseResult> {
@@ -44,6 +127,7 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
   let endTime = '';
   let promptCount = 0;
   let autoCompactions = 0;
+  const interactions: Interaction[] = [];
 
   const rl = createInterface({
     input: createReadStream(filePath),
@@ -78,6 +162,9 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
         autoCompactions++;
       } else {
         promptCount++;
+      }
+      for (const kind of classifyUserLine(obj)) {
+        interactions.push({ kind, timestamp: ts ?? '' });
       }
     }
 
@@ -132,6 +219,7 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
     messages: Array.from(byRequest.values()),
     promptCount,
     autoCompactions,
+    interactions,
   };
 }
 

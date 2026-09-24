@@ -13,10 +13,34 @@ import type {
   DeepSession,
   ModelSwitch,
   TranscriptDirGroup,
+  InteractionCounts,
 } from './types.ts';
 import type { ParsedMessage } from './types.ts';
 import type { SessionParseResult } from './parser.ts';
 import { computeCost, resolveModelPricing } from './cost.ts';
+
+/**
+ * Tally a session's classified user events. A correction is also an
+ * instruction — it is one the person typed — so it counts in both.
+ */
+export function countInteractions(session: EnrichedSession): InteractionCounts {
+  const counts: InteractionCounts = {
+    instructions: 0,
+    corrections: 0,
+    interrupts: 0,
+    toolResults: 0,
+    toolErrors: 0,
+    requests: session.messages.length,
+  };
+  for (const { kind } of session.interactions ?? []) {
+    if (kind === 'instruction' || kind === 'correction') counts.instructions++;
+    if (kind === 'correction') counts.corrections++;
+    if (kind === 'interrupt') counts.interrupts++;
+    if (kind === 'tool-ok' || kind === 'tool-error') counts.toolResults++;
+    if (kind === 'tool-error') counts.toolErrors++;
+  }
+  return counts;
+}
 
 export interface EnrichedSession extends SessionParseResult {
   project: string;
@@ -362,6 +386,8 @@ export function aggregate(
       if (count > 1) reworkEdits += count - 1;
     }
 
+    const interactions = countInteractions(session);
+
     sessionSummaries.push({
       id: session.sessionId,
       name: sessionNames.get(session.sessionId) ?? '',
@@ -383,6 +409,7 @@ export function aggregate(
       compaction,
       autoCompactions,
       reworkEdits,
+      interactions,
     });
   }
 

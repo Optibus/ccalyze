@@ -193,6 +193,22 @@ describe('mergeSessions', () => {
     assert.equal(merged[0].autoCompactions, 2);
   });
 
+  // Interactions are per-file too: the same guard applies, or a subagent file's
+  // tool results would vanish and an aliased path would double every instruction.
+  it('concatenates interactions from different transcripts, once per file', () => {
+    const at = '2026-03-29T10:00:00Z';
+    const merged = mergeSessions([
+      session({ filePaths: ['/main.jsonl'], interactions: [{ kind: 'instruction', timestamp: at }] }),
+      session({ filePaths: ['/main.jsonl'], interactions: [{ kind: 'instruction', timestamp: at }] }),
+      session({
+        filePaths: ['/subagents/a.jsonl'],
+        interactions: [{ kind: 'tool-error', timestamp: at }],
+        messages: [msg('sub-1')],
+      }),
+    ]);
+    assert.deepEqual(merged[0].interactions?.map((i) => i.kind), ['instruction', 'tool-error']);
+  });
+
   it('does not double autoCompactions for an identical filePath', () => {
     const merged = mergeSessions([
       session({ filePaths: ['/same.jsonl'], autoCompactions: 3 }),

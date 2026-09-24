@@ -17,6 +17,7 @@ import type {
   HabitsCohort,
   HabitsDelta,
   HabitsDurationBand,
+  HabitsEffectiveness,
   HabitsHeadline,
   HabitsLever,
   HabitsModelCostShare,
@@ -270,6 +271,31 @@ function countAnomalies(anomalies: Anomaly[]): Record<string, number> {
   return counts;
 }
 
+/**
+ * The effectiveness side of a window: how well instructions landed, rather than
+ * what they cost.
+ *
+ * Every rate divides by *typed instructions*, not by `prompts`: most `prompts`
+ * are tool results filed under the user role, so a per-prompt rate moves with how
+ * many tools ran and says nothing about how often the person had to step in.
+ */
+export function summarizeEffectiveness(sessions: SessionSummary[], cost: number): HabitsEffectiveness {
+  const total = (key: keyof SessionSummary['interactions']) =>
+    sessions.reduce((sum, s) => sum + (s.interactions?.[key] ?? 0), 0);
+  const instructions = total('instructions');
+  const toolResults = total('toolResults');
+  const per = (part: number, places: number, scale = 1) =>
+    instructions ? round((scale * part) / instructions, places) : null;
+  return {
+    instructions,
+    turnsPerInstruction: per(total('requests'), 1),
+    perInstruction: per(cost, 4),
+    correctionShare: per(total('corrections'), 1, 100),
+    interruptRate: per(total('interrupts'), 1, 100),
+    toolErrorShare: toolResults ? pct(total('toolErrors'), toolResults) : null,
+  };
+}
+
 /** Reduce one ccalyze run to the figures a habit comparison reads. */
 export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = {}): HabitsWindow {
   const unit = options.unit ?? 'units';
@@ -386,6 +412,7 @@ export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = 
       sessions.length,
     ),
     longRunningSessions: sessions.filter((s) => s.flags.includes('long-running')).length,
+    effectiveness: summarizeEffectiveness(sessions, cost),
     top3Share: pct(top3, cost),
     offHoursShare: pct(offHoursCost, cost),
     flagged: cohort(flagged),
@@ -509,6 +536,7 @@ export function scorecard(
     measure: string,
     get: (window: HabitsWindow) => number | null,
     lowerIsBetter = true,
+    group: HabitsScorecardRow['group'] = 'consumption',
   ): HabitsScorecardRow => {
     const a = prior ? get(prior) : null;
     const b = get(current);
@@ -522,7 +550,7 @@ export function scorecard(
         verdict = improved ? (move >= STRONG_MOVE ? 'much better' : 'better') : 'worse';
       }
     }
-    return { measure, prior: a, current: b, verdict };
+    return { measure, group, prior: a, current: b, verdict };
   };
 
   return [
@@ -541,6 +569,38 @@ export function scorecard(
     row(
       'Most-expensive-model share of consumption',
       (w) => w.modelCostShare[0]?.costShare ?? null,
+    ),
+    // Effectiveness: did the work go well, not what did it cost. `?.` because a
+    // report built before these fields existed carries no `effectiveness` block.
+    row(
+      'Agent turns per typed instruction',
+      (w) => w.effectiveness?.turnsPerInstruction ?? null,
+      false,
+      'effectiveness',
+    ),
+    row(
+      'Consumption per typed instruction',
+      (w) => w.effectiveness?.perInstruction ?? null,
+      true,
+      'effectiveness',
+    ),
+    row(
+      'Instructions that correct the last turn (share)',
+      (w) => w.effectiveness?.correctionShare ?? null,
+      true,
+      'effectiveness',
+    ),
+    row(
+      'Interrupts per 100 instructions',
+      (w) => w.effectiveness?.interruptRate ?? null,
+      true,
+      'effectiveness',
+    ),
+    row(
+      'Tool calls that errored (share)',
+      (w) => w.effectiveness?.toolErrorShare ?? null,
+      true,
+      'effectiveness',
     ),
   ];
 }
@@ -749,6 +809,21 @@ export function buildHabitsReport(
         'default rather than a detected one — pass --weekend for a Sun-Thu week. ' +
         'Rising night/weekend share is a burnout signal, not a cost one; read it on its ' +
         'own, not folded into the headline.',
+      instructionsAreTyped:
+        'Effectiveness rates divide by instructions the person typed — not by prompts, ' +
+        'most of which are tool results Claude Code files under the user role. Slash ' +
+        'commands, interrupt markers and injected wrappers are not counted as ' +
+        'instructions. More agent turns per instruction reads as better: each instruction ' +
+        'carried more work. It can also mean a runaway loop, so read it beside the ' +
+        'correction and interrupt rows.',
+      correctionIsHeuristic:
+        'A correction is an instruction whose opening words push back on the last turn ' +
+        '("no", "that\'s wrong", "revert", "still failing") — English only, and a polite ' +
+        'redirect is missed. Read the direction across two windows, not the level.',
+      toolErrorsIncludeDenials:
+        'A tool error is any tool result marked as an error: a failing command, a missing ' +
+        'file, and also a permission you denied. A test run that fails on purpose counts too, ' +
+        'so the level is never zero — read the direction.',
       cleanCohort:
         `Unflagged sessions hold ${current.clean.promptShare}% of prompts` +
         (current.cleanCohortUsable

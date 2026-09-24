@@ -226,6 +226,36 @@ describe('aggregate — rework', () => {
     }], [], range);
     assert.equal(result.sessions[0].reworkEdits, 0);
   });
+
+  it('tallies interactions, counting a correction as an instruction too', () => {
+    const at = '2026-03-29T10:00:00Z';
+    const result = aggregate([{
+      sessionId: 'sess-a', project: 'p', startTime: at, endTime: '2026-03-29T11:00:00Z',
+      transcriptSizeMB: 1, promptCount: 9,
+      messages: [msg('r1', []), msg('r2', []), msg('r3', [])],
+      interactions: [
+        { kind: 'instruction', timestamp: at },
+        { kind: 'correction', timestamp: at },
+        { kind: 'interrupt', timestamp: at },
+        { kind: 'tool-ok', timestamp: at },
+        { kind: 'tool-ok', timestamp: at },
+        { kind: 'tool-error', timestamp: at },
+      ],
+    }], [], range);
+    assert.deepEqual(result.sessions[0].interactions, {
+      instructions: 2, corrections: 1, interrupts: 1, toolResults: 3, toolErrors: 1, requests: 3,
+    });
+  });
+
+  it('reads a session with no interactions field as all zeros but its requests', () => {
+    const result = aggregate([{
+      sessionId: 'sess-a', project: 'p', startTime: '2026-03-29T10:00:00Z', endTime: '2026-03-29T11:00:00Z',
+      transcriptSizeMB: 1, promptCount: 1, messages: [msg('r1', [])],
+    }], [], range);
+    assert.deepEqual(result.sessions[0].interactions, {
+      instructions: 0, corrections: 0, interrupts: 0, toolResults: 0, toolErrors: 0, requests: 1,
+    });
+  });
 });
 
 describe('buildDeepData', () => {
@@ -263,6 +293,7 @@ describe('buildDeepData', () => {
       compaction: 'none',
       autoCompactions: 0,
       reworkEdits: 0,
+      interactions: { instructions: 0, corrections: 0, interrupts: 0, toolResults: 0, toolErrors: 0, requests: 0 },
       ...over,
     };
   }
