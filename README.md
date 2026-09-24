@@ -102,9 +102,23 @@ ccalyze 30d --habits    # 30 vs. 30
 
 The output is a findings document, not a usage summary: a `headline` naming which of the three
 explanations the data supports (`volume` — the extra usage is workload, nothing to fix;
-`efficiency-regression` — a habit; `mixed`), a `scorecard` of nine measures with a mechanical
-verdict each, `levers` sizing what is still on the table, and `caveats` that keep the figures
-honest. A sub-5% move reads `flat`, not `better` — a scorecard that books noise as a win stops
+`efficiency-regression` — a habit; `mixed`), a `scorecard` with a mechanical verdict per measure,
+`levers` sizing what is still on the table, and `caveats` that keep the figures honest.
+
+The scorecard has two groups. **Consumption** rows ask what the work cost (per-prompt, cold starts,
+compaction, model mix, off-hours, …). **Effectiveness** rows ask how well it went — whether
+instructions landed the first time:
+
+| Row | Reads | Better when |
+|---|---|---|
+| Agent turns per typed instruction | how much work one instruction sets off | higher |
+| Consumption per typed instruction | what one instruction costs | lower |
+| Instructions that correct the last turn | "no, …", "that's wrong", "revert" as the opening words | lower |
+| Interrupts per 100 instructions | times you pressed Esc to stop Claude mid-turn | lower |
+| Tool calls that errored | failed commands, missing files, denied permissions | lower |
+
+Every effectiveness rate divides by the instructions a person actually **typed** — not by
+`prompts`, most of which are tool results Claude Code files under the user role. A sub-5% move reads `flat`, not `better` — a scorecard that books noise as a win stops
 being worth reading.
 
 Two things it deliberately refuses:
@@ -133,15 +147,18 @@ ccalyze --habits --single-window            # first-ever run: describes habits, 
 ### The report page
 
 **Every `--habits` run writes one too** — the same findings as a self-contained HTML file:
-conclusion and recommendations first, then the scorecard, then the charts, then the reading notes.
+conclusion and recommendations first, then the scorecard, the effectiveness table, the charts, and
+the reading notes.
 The JSON still goes to stdout unchanged, and the page path is printed on stderr:
 
 ```bash
 ccalyze --habits 7d                              # page in ~/.claude/ccalyze/habits-FROM_TO.html
 ccalyze --habits 7d --html ~/usage-report.html   # or a path you choose
 ccalyze --habits 7d > findings.json              # page on disk, JSON captured
-ccalyze --habits 7d --no-html                    # JSON only, no page
 ```
+
+There is no way to turn the page off: it is the report. (`--no-html` was removed and is refused by
+name.)
 
 Nothing in the page is fetched from anywhere: no CDN, no font host, no analytics. Every number
 renders from the findings JSON embedded in the file itself, and the prose is generated from that

@@ -9,6 +9,7 @@
  * Everything in this file is a pure function over `CcalyzeOutput`, so the whole
  * analysis is testable without touching a transcript.
  */
+import { LOW_CACHE_RATIO_THRESHOLD } from "./anomalies.js";
 /**
  * Flags describing *behaviour*.
  *
@@ -43,6 +44,14 @@ export const COVERAGE_ASYMMETRY_FLOOR = 0.6;
 export const COVERAGE_SPARSITY_FLOOR = 0.35;
 /** Relative move below which a scorecard row reads `flat` rather than a direction. */
 export const NOISE_FLOOR = 0.05;
+/**
+ * Flagged-session cost share the re-measure aims below.
+ *
+ * Lives here, not in `prose.ts`, so the scorecard's target text and the
+ * remeasure prose read the same number — `prose.ts` imports it rather than
+ * keeping its own copy.
+ */
+export const FLAGGED_SHARE_TARGET = 40;
 /** Local hour at/after which a session's start reads as night, until {@link OFF_HOURS_END}. */
 export const OFF_HOURS_START = 20;
 /** Local hour before which a session's start still reads as night. */
@@ -206,6 +215,28 @@ function countAnomalies(anomalies) {
         counts[anomaly.type] = (counts[anomaly.type] ?? 0) + 1;
     return counts;
 }
+/**
+ * The effectiveness side of a window: how well instructions landed, rather than
+ * what they cost.
+ *
+ * Every rate divides by *typed instructions*, not by `prompts`: most `prompts`
+ * are tool results filed under the user role, so a per-prompt rate moves with how
+ * many tools ran and says nothing about how often the person had to step in.
+ */
+export function summarizeEffectiveness(sessions, cost) {
+    const total = (key) => sessions.reduce((sum, s) => sum + (s.interactions?.[key] ?? 0), 0);
+    const instructions = total('instructions');
+    const toolResults = total('toolResults');
+    const per = (part, places, scale = 1) => instructions ? round((scale * part) / instructions, places) : null;
+    return {
+        instructions,
+        turnsPerInstruction: per(total('requests'), 1),
+        perInstruction: per(cost, 4),
+        correctionShare: per(total('corrections'), 1, 100),
+        interruptRate: per(total('interrupts'), 1, 100),
+        toolErrorShare: toolResults ? pct(total('toolErrors'), toolResults) : null,
+    };
+}
 /** Reduce one ccalyze run to the figures a habit comparison reads. */
 export function summarizeWindow(output, options = {}) {
     const unit = options.unit ?? 'units';
@@ -303,6 +334,7 @@ export function summarizeWindow(output, options = {}) {
         autoCompactionShare: pct(sessions.filter((s) => s.compaction === 'auto').length, sessions.length),
         reworkShare: pct(sessions.filter((s) => s.reworkEdits > 0).length, sessions.length),
         longRunningSessions: sessions.filter((s) => s.flags.includes('long-running')).length,
+        effectiveness: summarizeEffectiveness(sessions, cost),
         top3Share: pct(top3, cost),
         offHoursShare: pct(offHoursCost, cost),
         flagged: cohort(flagged),
@@ -408,9 +440,13 @@ export function levers(current) {
 function over24hShare(window) {
     return window.byDuration.find((band) => band.band === OVER_24H_BAND)?.costShare ?? null;
 }
+/** No fixed target exists for this measure — say so instead of inventing a number. */
+const NO_TARGET = 'No fixed target — compare the trend across windows, not the level.';
+const CACHE_TARGET = `${Math.round(LOW_CACHE_RATIO_THRESHOLD * 100)}%+ (healthy sessions run 90-99%)`;
+const FLAGGED_TARGET = `Under ${FLAGGED_SHARE_TARGET}% of the window`;
 /** Mechanical verdicts. `better`/`worse` about a number, never about a person. */
-export function scorecard(current, prior) {
-    const row = (measure, get, lowerIsBetter = true) => {
+export function scorecard(current, prior, unit = 'units') {
+    const row = (measure, get, rowUnit, target, lowerIsBetter = true, group = 'consumption') => {
         const a = prior ? get(prior) : null;
         const b = get(current);
         let verdict = 'no-baseline';
@@ -424,22 +460,29 @@ export function scorecard(current, prior) {
                 verdict = improved ? (move >= STRONG_MOVE ? 'much better' : 'better') : 'worse';
             }
         }
-        return { measure, prior: a, current: b, verdict };
+        return { measure, group, prior: a, current: b, verdict, unit: rowUnit, lowerIsBetter, target };
     };
     return [
-        row('Consumption per prompt', (w) => w.perPrompt),
-        row('Cold-start premium, share of total', (w) => w.coldStart.share),
-        row('Sessions resumed cold after an idle gap', (w) => w.coldStart.sessions),
-        row('Share carried by sessions over 24 h', over24hShare),
-        row('Top-three session concentration', (w) => w.top3Share),
-        row('Off-hours share (nights + weekends)', (w) => w.offHoursShare),
-        row('Cache-read share of input tokens', (w) => w.cacheReadShare, false),
-        row('Subagent delegation, share of input tokens', (w) => w.subagentTokenShare, false),
-        row('Sessions with no /compact (share)', (w) => w.noCompactionShare),
-        row('Sessions auto-compacted, hit the wall (share)', (w) => w.autoCompactionShare),
-        row('Sessions with repeated same-file edits (share)', (w) => w.reworkShare),
-        row('Share in sessions carrying a behavioural flag', (w) => w.flagged.costShare),
-        row('Most-expensive-model share of consumption', (w) => w.modelCostShare[0]?.costShare ?? null),
+        row('Consumption per prompt', (w) => w.perPrompt, unit, NO_TARGET),
+        row('Cold-start premium, share of total', (w) => w.coldStart.share, '%', '0% — every cold rebuild is avoidable by not leaving a big session idle for an hour.'),
+        row('Sessions resumed cold after an idle gap', (w) => w.coldStart.sessions, 'sessions', '0 sessions, for the same reason.'),
+        row('Share carried by sessions over 24 h', over24hShare, '%', 'No fixed target — high is fine if the work genuinely spans days.'),
+        row('Top-three session concentration', (w) => w.top3Share, '%', 'No fixed target — watch for a sudden spike concentrated in one or two sessions.'),
+        row('Off-hours share (nights + weekends)', (w) => w.offHoursShare, '%', 'No fixed target — this is a burnout signal, not a cost one.'),
+        row('Cache-read share of input tokens', (w) => w.cacheReadShare, '%', CACHE_TARGET, false),
+        row('Subagent delegation, share of input tokens', (w) => w.subagentTokenShare, '%', 'No fixed target — higher just means more work ran through subagents.', false),
+        row('Sessions with no /compact (share)', (w) => w.noCompactionShare, '%', '0% — every session that grows large should get a /compact before it does.'),
+        row('Sessions auto-compacted, hit the wall (share)', (w) => w.autoCompactionShare, '%', '0% — hitting the wall means /compact came too late.'),
+        row('Sessions with repeated same-file edits (share)', (w) => w.reworkShare, '%', NO_TARGET + ' This can be healthy iteration as easily as thrashing.'),
+        row('Share in sessions carrying a behavioural flag', (w) => w.flagged.costShare, '%', FLAGGED_TARGET),
+        row('Most-expensive-model share of consumption', (w) => w.modelCostShare[0]?.costShare ?? null, '%', 'No fixed target — depends how much of the work genuinely needs the expensive model.'),
+        // Effectiveness: did the work go well, not what did it cost. `?.` because a
+        // report built before these fields existed carries no `effectiveness` block.
+        row('Agent turns per typed instruction', (w) => w.effectiveness?.turnsPerInstruction ?? null, 'turns', 'No fixed target — higher means each instruction did more work. Read it beside corrections and interrupts, since a runaway loop looks the same.', false, 'effectiveness'),
+        row('Consumption per typed instruction', (w) => w.effectiveness?.perInstruction ?? null, unit, NO_TARGET, true, 'effectiveness'),
+        row('Instructions that correct the last turn (share)', (w) => w.effectiveness?.correctionShare ?? null, '%', '0% is ideal — every correction means a redo.', true, 'effectiveness'),
+        row('Interrupts per 100 instructions', (w) => w.effectiveness?.interruptRate ?? null, 'per 100', '0 is ideal — every interrupt means the agent went off track.', true, 'effectiveness'),
+        row('Tool calls that errored (share)', (w) => w.effectiveness?.toolErrorShare ?? null, '%', 'As close to 0% as practical — denied permissions count too, so it never quite reaches 0.', true, 'effectiveness'),
     ];
 }
 /**
@@ -578,40 +621,36 @@ export function buildHabitsReport(currentOutput, priorOutput, options = {}) {
         prior,
         delta,
         headline: headline(current, prior),
-        scorecard: scorecard(current, prior),
+        scorecard: scorecard(current, prior, unit),
         levers: levers(current),
         caveats: {
-            costIsNotional: 'ccalyze prices tokens at published per-token API list rates, which is ' +
-                'explicitly not what a subscription charges. Treat the figure as a quota ' +
-                'proxy, never as spend.',
-            durationIsWallClock: 'Session duration runs from first to last message, so idle and overnight ' +
-                'time counts. It is not a working-hours measure.',
-            flaggedShareIsHigh: 'no-compaction fires at 30 prompts and long-running at three hours, so ' +
-                'sustained agentic work trips one by default. Read the direction, not the level.',
-            byDayIsStartDated: "A session's whole consumption is stamped on the date it started, so " +
-                'per-day figures are not daily effort.',
-            autoCompactionNeedsRecentTranscripts: 'Auto-compaction is only detectable on transcripts new enough to carry the field ' +
-                'Claude Code stamps on the synthetic continuation message — older ones read as ' +
-                "0, same as a session that never filled up. A session that hit the wall isn't " +
-                'unmanaged: read this alongside, not instead of, no-compact share.',
-            reworkIsNotAJudgement: 'Rework only counts Edit/Write/MultiEdit tool calls that touched a file this session ' +
-                'already edited. It cannot tell deliberate iteration from thrashing — read the ' +
-                'direction across two windows, not the level in one.',
-            offHoursIsLocalClock: 'Off-hours reads the local clock of the machine that ran ccalyze, because the ' +
-                'transcript stores no time zone at all — only honest when that machine and time ' +
-                'zone match where the work actually happened. Weekend counted as ' +
-                `${weekendLabel(options.weekendDays ?? DEFAULT_WEEKEND_DAYS)}, which is a stated ` +
-                'default rather than a detected one — pass --weekend for a Sun-Thu week. ' +
-                'Rising night/weekend share is a burnout signal, not a cost one; read it on its ' +
-                'own, not folded into the headline.',
+            costIsNotional: 'These are list-price API costs, not your bill. Use them to compare windows, never as spend.',
+            durationIsWallClock: 'Session duration counts idle and overnight time too — it is not hours worked.',
+            flaggedShareIsHigh: 'A session gets flagged easily: 30 prompts with no /compact, or 3 hours, is enough. ' +
+                'A high flagged share is normal for sustained work — watch the direction, not the level.',
+            byDayIsStartDated: "A session's whole cost is stamped on the day it started, so daily totals are not daily effort.",
+            autoCompactionNeedsRecentTranscripts: 'Auto-compaction only shows up in recent transcripts — older sessions read as 0 even if ' +
+                'they hit the wall. Check this next to the no-compact row, not instead of it.',
+            reworkIsNotAJudgement: 'Rework counts edits to a file this session already touched. It cannot tell deliberate ' +
+                'iteration from thrashing — read the trend across windows, not the level in one.',
+            offHoursIsLocalClock: "Off-hours uses this machine's local clock and counts " +
+                `${weekendLabel(options.weekendDays ?? DEFAULT_WEEKEND_DAYS)} as the weekend — only ` +
+                'accurate if that matches where the work actually happened (pass --weekend to change it). ' +
+                'A rising night/weekend share is a burnout signal, not a cost one.',
+            instructionsAreTyped: 'These rates divide by instructions typed, not every prompt Claude Code sends — most ' +
+                'prompts are tool results, not typed by anyone. More turns per instruction can mean more ' +
+                'work got done, or a runaway loop — read it beside corrections and interrupts.',
+            correctionIsHeuristic: 'A correction is guessed from the opening words ("no", "revert", "still failing") — ' +
+                'English only, so a polite redirect is missed. Read the trend, not the exact number.',
+            toolErrorsIncludeDenials: "Tool errors include denied permissions and tests that fail on purpose, so this is " +
+                'never exactly 0. Read the direction, not the level.',
             cleanCohort: `Unflagged sessions hold ${current.clean.promptShare}% of prompts` +
                 (current.cleanCohortUsable
-                    ? ' — usable as a baseline.'
-                    : ` — below the ${Math.round(COHORT_FLOOR * 100)}% floor, so the ` +
-                        'flagged/unflagged split is not a usable baseline. Use the model split ' +
-                        'and the project split instead.'),
-            baselineUnmeasured: 'Per-request baseline (MCP tool definitions plus instruction files) is not ' +
-                'in this data. Only /context converts it into a share of the window.',
+                    ? ' — enough to use as a baseline.'
+                    : ` — too small a baseline (need ${Math.round(COHORT_FLOOR * 100)}%+). Use the model ` +
+                        'and project splits instead.'),
+            baselineUnmeasured: 'MCP tool definitions and instruction files are resent on every prompt, and this data ' +
+                "can't see that cost. Run /context to see their share of the window.",
         },
     };
     return { report, warnings };

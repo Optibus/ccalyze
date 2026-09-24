@@ -23,6 +23,14 @@ function window_(overrides: Partial<HabitsWindow> = {}): HabitsWindow {
     autoCompactionShare: 10,
     reworkShare: 25,
     longRunningSessions: 5,
+    effectiveness: {
+      instructions: 50,
+      turnsPerInstruction: 12.5,
+      perInstruction: 1.6,
+      correctionShare: 8,
+      interruptRate: 4,
+      toolErrorShare: 6.5,
+    },
     top3Share: 30,
     offHoursShare: 20,
     flagged: cohort,
@@ -52,7 +60,10 @@ function report_(overrides: Partial<HabitsReport> = {}): HabitsReport {
     prior: window_({ range: { from: '2026-08-04', to: '2026-08-10' }, cost: 60 }),
     delta: { cost: 33.3, prompts: 0, perPrompt: 33.3, sessions: 0 },
     headline: { finding: 'volume', why: 'Cost tracked volume.' },
-    scorecard: [{ measure: 'Consumption per prompt', prior: 0.2, current: 0.2, verdict: 'flat' }],
+    scorecard: [
+      { measure: 'Consumption per prompt', group: 'consumption', prior: 0.2, current: 0.2, verdict: 'flat', unit: 'units', lowerIsBetter: true, target: 'No fixed target.' },
+      { measure: 'Interrupts per 100 instructions', group: 'effectiveness', prior: 2, current: 4, verdict: 'worse', unit: 'per 100', lowerIsBetter: true, target: '0 is ideal.' },
+    ],
     levers: [],
     caveats: { costIsNotional: 'not money' },
     ...overrides,
@@ -109,7 +120,7 @@ describe('renderHabitsHtml', () => {
     const html = renderHabitsHtml(report_(), { today: TODAY });
     assert.match(html, /<h1>The extra usage is workload, not a habit<\/h1>/);
     assert.match(html, /Cost tracked volume\./);
-    assert.match(html, /<div class="cmdbox">ccalyze --habits 7d --html<\/div>/);
+    assert.match(html, /<div class="cmdbox">ccalyze --habits 7d<\/div>/);
     assert.match(html, /On <strong>2026-08-25<\/strong>/);
   });
 
@@ -171,11 +182,27 @@ describe('renderHabitsHtml', () => {
       'autoCompactionNeedsRecentTranscripts',
       'reworkIsNotAJudgement',
       'offHoursIsLocalClock',
+      'instructionsAreTyped',
+      'correctionIsHeuristic',
+      'toolErrorsIncludeDenials',
       'cleanCohort',
       'baselineUnmeasured',
     ]) {
       assert.match(html, new RegExp(`${key}:`), `${key} has a reading-note title`);
     }
+  });
+
+  it('renders effectiveness rows in their own table, apart from the scorecard', () => {
+    const html = renderHabitsHtml(report_(), { today: TODAY });
+    assert.match(html, /<tbody id="effectiveness"><\/tbody>/);
+    assert.match(html, /How well the work flowed/);
+    assert.match(html, /r\.group === "effectiveness"/);
+    assert.match(html, /r\.group !== "effectiveness"/, 'an ungrouped row stays in the scorecard');
+  });
+
+  it('prints the effectiveness paragraph the findings imply', () => {
+    const html = renderHabitsHtml(report_(), { today: TODAY });
+    assert.match(html, /Across 50 typed instructions, each typed instruction set off 12\.5 agent turns/);
   });
 
   it('is self-contained: nothing is fetched from another host', () => {

@@ -13,7 +13,7 @@
  * clock beyond an injectable `today`, so every branch is testable.
  */
 
-import { spanDays } from './habits.ts';
+import { FLAGGED_SHARE_TARGET, spanDays } from './habits.ts';
 import type {
   HabitsLever,
   HabitsReport,
@@ -21,8 +21,7 @@ import type {
   HabitsWindow,
 } from './types.ts';
 
-/** Flagged-session cost share the re-measure aims below. */
-export const FLAGGED_SHARE_TARGET = 40;
+export { FLAGGED_SHARE_TARGET };
 
 /**
  * Sessions per window below which one scorecard row is anecdote, not a direction.
@@ -63,6 +62,8 @@ export interface ReportProse {
   durationCaption: string;
   modelCaption: string;
   projectCaption: string;
+  /** Lead paragraph of the effectiveness section: how well the work flowed. */
+  effectiveness: string;
   remeasure: ProseRemeasure;
 }
 
@@ -272,9 +273,7 @@ function leverRecommendation(report: HabitsReport, unit: string): ProseRecommend
       return {
         rank: 1,
         title: `Pull ${row.measure.toLowerCase()} back to where it was`,
-        body:
-          'No sized lever came out of this window, so the largest available move is the row ' +
-          'that regressed. Nothing else in the data prices higher than returning it.',
+        body: 'No bigger lever showed up this window, so fixing this regression is the biggest win on the table.',
         evidence: worse.slice(0, 3).map((r) => `${r.measure}: ${move(r)} · ${r.verdict}`),
         size: `${row.current === null ? '—' : n(row.current)}`,
         sizeLabel: 'the row to return',
@@ -284,9 +283,8 @@ function leverRecommendation(report: HabitsReport, unit: string): ProseRecommend
       rank: 1,
       title: 'Ask for headroom, not for more optimisation',
       body:
-        'The sessions are clean on every measure here and no lever sizes above zero. There are ' +
-        'no savings in this data to find, so the honest ask is a higher ceiling — with an ' +
-        'explicit end date, so it gets re-measured rather than becoming the new normal.',
+        'Everything here is clean — there are no savings left to find in this data. If the ' +
+        'limit still binds, ask for a higher ceiling with an explicit end date, then re-measure.',
       evidence: [
         `flagged share of ${unit}: ${current.flagged.costShare}%`,
         `cache-read share: ${current.cacheReadShare}%`,
@@ -303,10 +301,9 @@ function leverRecommendation(report: HabitsReport, unit: string): ProseRecommend
       rank: 1,
       title: 'Move the prompts that do not need the expensive model off it',
       body:
-        `The gap is measured on this window's own work, not a benchmark: ${lever.basis}` +
-        (lever.ratio ? `, a ${lever.ratio}× rate difference. ` : '. ') +
-        'Start with the prompts that already have cheaper precedent — mechanical edits, ' +
-        'reruns, and anything a previous session solved the same way.',
+        `${lever.basis}` +
+        (lever.ratio ? `, a ${lever.ratio}× rate difference.` : '.') +
+        ' Move the mechanical edits and reruns to the cheaper model first — anything a past session already solved the same way.',
       evidence: [
         `basis: ${lever.basis}`,
         `ceiling: ${n(lever.ceiling)} ${unit} (${lever.ceilingShare}% of the window)`,
@@ -320,9 +317,7 @@ function leverRecommendation(report: HabitsReport, unit: string): ProseRecommend
   return {
     rank: 1,
     title: 'Close the gap to the cheapest project doing comparable work',
-    body:
-      `Two large cohorts of the same person's own work, so the cheaper rate is achieved rather ` +
-      `than hypothetical: ${lever.basis}. The cheap end is the target because it already happened.`,
+    body: `${lever.basis}. That cheaper rate already happened in your own work — it's not a guess.`,
     evidence: [
       `basis: ${lever.basis}`,
       `ceiling: ${n(lever.ceiling)} ${unit} (${lever.ceilingShare}% of the window)`,
@@ -345,9 +340,8 @@ function baselineRecommendation(report: HabitsReport): ProseRecommendation {
     rank: 2,
     title: 'Measure the per-request baseline',
     body:
-      'Run /context in the heaviest repo. MCP tool definitions and instruction files are ' +
-      're-sent ahead of every prompt, and this data cannot see them. Only /context converts ' +
-      'that into a share of the window, and it cannot be automated.',
+      "Run /context in your heaviest repo. Tool definitions and instruction files get resent " +
+      "on every prompt, and this data can't see that cost — /context is the only way to check it.",
     evidence: [
       report.caveats.baselineUnmeasured ?? 'Per-request baseline is not in this data.',
       `prompts it would multiply against: ${n(report.current.prompts)}`,
@@ -368,10 +362,8 @@ function heldRecommendation(report: HabitsReport): ProseRecommendation {
       rank: 3,
       title: report.prior ? 'Nothing is banked yet — set the baseline and re-run' : 'Set the baseline, then re-run',
       body: report.prior
-        ? 'No measure improved enough to keep. That makes this run the baseline: the next one at ' +
-          'the same length is the first that can show a habit change holding.'
-        : 'A single window cannot show anything holding. This run is the baseline; the next one ' +
-          'at the same length is the first comparison.',
+        ? 'Nothing improved enough to bank. This run becomes the baseline — compare the next one at the same length.'
+        : 'A single window cannot show anything holding. This run is the baseline; compare the next one at the same length.',
       evidence: flat.length
         ? flat.slice(0, 3).map((row) => `${row.measure}: ${move(row)} · flat`)
         : ['no scorecard row moved beyond the 5% noise floor'],
@@ -385,9 +377,8 @@ function heldRecommendation(report: HabitsReport): ProseRecommendation {
     title: 'Keep doing what already worked',
     body:
       `${held.length === 1 ? 'One measure' : `${held.length} measures`} moved ` +
-      `${strong.length ? 'strongly ' : ''}in the right direction. Whatever produced that is the ` +
-      'cheapest change available, because it is already in the habit — losing it costs more than ' +
-      'any lever above gains.',
+      `${strong.length ? 'strongly ' : ''}in the right direction. Keep doing whatever caused ` +
+      "that — it's already the habit, and dropping it costs more than any fix above gains.",
     evidence: held.slice(0, 3).map((row) => `${row.measure}: ${move(row)} · ${row.verdict}`),
     size: 'Held',
     sizeLabel: 'already banked',
@@ -455,6 +446,57 @@ function projectCaptionText(report: HabitsReport, unit: string): string {
   );
 }
 
+/**
+ * The effectiveness section's lead: the current level of each flow measure, then
+ * which of them moved the wrong way. Quotes only `current.effectiveness` and the
+ * effectiveness scorecard rows.
+ */
+function effectivenessText(report: HabitsReport): string {
+  const e = report.current.effectiveness;
+  if (!e || !e.instructions) {
+    return (
+      'No typed instruction was found in this window, so there is nothing to divide by. ' +
+      'Older transcripts may predate the fields these rows read.'
+    );
+  }
+  const parts: string[] = [];
+  const levels: string[] = [];
+  if (e.turnsPerInstruction !== null) {
+    levels.push(`each typed instruction set off ${e.turnsPerInstruction} agent turns`);
+  }
+  if (e.correctionShare !== null) levels.push(`${e.correctionShare}% of instructions corrected the last turn`);
+  if (e.interruptRate !== null) levels.push(`${e.interruptRate} interrupts per 100 instructions`);
+  if (e.toolErrorShare !== null) levels.push(`${e.toolErrorShare}% of tool calls errored`);
+  parts.push(
+    `Across ${n(e.instructions)} typed instructions, ${levels.join(', ')}. ` +
+      'These rows measure whether instructions landed first time, not what they cost.',
+  );
+
+  const rows = report.scorecard.filter((row) => row.group === 'effectiveness');
+  const worse = rows.filter((row) => row.verdict === 'worse');
+  const better = rows.filter((row) => row.verdict.endsWith('better'));
+  if (!report.prior) {
+    parts.push('With no prior window these are levels, not directions.');
+  } else if (worse.length) {
+    parts.push(
+      `Moved the wrong way: ${worse.map((row) => `${row.measure.toLowerCase()} (${move(row)})`).join('; ')}.`,
+    );
+    if (worse.some((row) => /correct|interrupt/i.test(row.measure))) {
+      parts.push(
+        'A rising correction or interrupt rate usually means instructions are arriving before ' +
+          'the task is pinned down — a sharper first message or a plan step is the usual fix.',
+      );
+    }
+  } else if (better.length) {
+    parts.push(
+      `Improved: ${better.map((row) => `${row.measure.toLowerCase()} (${move(row)})`).join('; ')}.`,
+    );
+  } else {
+    parts.push('None moved beyond the 5% noise floor.');
+  }
+  return parts.join(' ');
+}
+
 function remeasureProse(report: HabitsReport, lengthDays: number, today: string): ProseRemeasure {
   const { current, prior } = report;
   const targets: string[] = [];
@@ -472,6 +514,13 @@ function remeasureProse(report: HabitsReport, lengthDays: number, today: string)
     const aim = leverAim(lever);
     targets.push(`${aim.share}% of the window recovered from ${lever.lever}`);
   }
+  // The better of the two windows: a correction share that rose is aimed back
+  // at where it was, never held at the worse level.
+  const corrections = [current.effectiveness?.correctionShare, prior?.effectiveness?.correctionShare]
+    .filter((v): v is number => typeof v === 'number');
+  if (corrections.length) {
+    targets.push(`corrections at or under ${Math.min(...corrections)}% of instructions`);
+  }
 
   const sentence =
     `Targets: ${targets.join('; ')}. Re-run at the same length — a ${lengthDays}d run followed ` +
@@ -484,7 +533,7 @@ function remeasureProse(report: HabitsReport, lengthDays: number, today: string)
 
   return {
     date: shiftDate(today, lengthDays),
-    command: `ccalyze --habits ${lengthDays}d --html`,
+    command: `ccalyze --habits ${lengthDays}d`,
     targets: sentence,
   };
 }
@@ -512,6 +561,7 @@ export function buildProse(report: HabitsReport, options: ProseOptions = {}): Re
     durationCaption: durationCaptionText(report, unit),
     modelCaption: modelCaptionText(report, unit),
     projectCaption: projectCaptionText(report, unit),
+    effectiveness: effectivenessText(report),
     remeasure: remeasureProse(report, lengthDays, today),
   };
 }

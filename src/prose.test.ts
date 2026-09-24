@@ -41,6 +41,14 @@ function window_(overrides: Partial<HabitsWindow> = {}): HabitsWindow {
     autoCompactionShare: 10,
     reworkShare: 25,
     longRunningSessions: 5,
+    effectiveness: {
+      instructions: 50,
+      turnsPerInstruction: 12.5,
+      perInstruction: 1.6,
+      correctionShare: 8,
+      interruptRate: 4,
+      toolErrorShare: 6.5,
+    },
     top3Share: 30,
     offHoursShare: 20,
     flagged: cohort(),
@@ -71,8 +79,14 @@ function window_(overrides: Partial<HabitsWindow> = {}): HabitsWindow {
   };
 }
 
-function row(measure: string, prior: number | null, current: number | null, verdict: HabitsVerdict): HabitsScorecardRow {
-  return { measure, prior, current, verdict };
+function row(
+  measure: string,
+  prior: number | null,
+  current: number | null,
+  verdict: HabitsVerdict,
+  group: HabitsScorecardRow['group'] = 'consumption',
+): HabitsScorecardRow {
+  return { measure, group, prior, current, verdict, unit: '%', lowerIsBetter: true, target: '' };
 }
 
 const MODEL_LEVER: HabitsLever = {
@@ -120,6 +134,77 @@ function report_(overrides: Partial<HabitsReport> = {}): HabitsReport {
 const TODAY = '2026-08-18';
 
 // --- the mechanical recipes -------------------------------------------------
+
+describe('buildProse — effectiveness', () => {
+  it('states the current level of each flow measure', () => {
+    const prose = buildProse(report_(), { today: '2026-08-18' });
+    assert.match(prose.effectiveness, /^Across 50 typed instructions, each typed instruction set off 12\.5 agent turns, 8% of instructions corrected the last turn, 4 interrupts per 100 instructions, 6\.5% of tool calls errored\./);
+  });
+
+  it('names the flow rows that moved the wrong way, and only those', () => {
+    const prose = buildProse(
+      report_({
+        scorecard: [
+          row('Consumption per prompt', 0.1, 0.2, 'worse'),
+          row('Interrupts per 100 instructions', 2, 4, 'worse', 'effectiveness'),
+        ],
+      }),
+      { today: '2026-08-18' },
+    );
+    assert.match(prose.effectiveness, /Moved the wrong way: interrupts per 100 instructions \(2 → 4\)\./);
+    assert.doesNotMatch(prose.effectiveness, /consumption per prompt/);
+    assert.match(prose.effectiveness, /sharper first message/);
+  });
+
+  it('keeps the correction advice off a window where only tool errors rose', () => {
+    const prose = buildProse(
+      report_({ scorecard: [row('Tool calls that errored (share)', 3, 5, 'worse', 'effectiveness')] }),
+      { today: '2026-08-18' },
+    );
+    assert.doesNotMatch(prose.effectiveness, /sharper first message/);
+  });
+
+  it('says so when the window has no typed instruction', () => {
+    const empty = window_({
+      effectiveness: {
+        instructions: 0, turnsPerInstruction: null, perInstruction: null,
+        correctionShare: null, interruptRate: null, toolErrorShare: null,
+      },
+    });
+    assert.match(buildProse(report_({ current: empty })).effectiveness, /No typed instruction was found/);
+  });
+});
+
+describe('buildProse — correction target', () => {
+  const eff = (correctionShare: number | null) => ({
+    instructions: 50, turnsPerInstruction: 10, perInstruction: 1,
+    correctionShare, interruptRate: 1, toolErrorShare: 1,
+  });
+
+  it('aims a risen correction share back at the prior level', () => {
+    const prose = buildProse(
+      report_({ current: window_({ effectiveness: eff(8) }), prior: window_({ effectiveness: eff(5) }) }),
+      { today: '2026-08-18' },
+    );
+    assert.match(prose.remeasure.targets, /corrections at or under 5% of instructions/);
+  });
+
+  it('holds an improved share at the current level', () => {
+    const prose = buildProse(
+      report_({ current: window_({ effectiveness: eff(3) }), prior: window_({ effectiveness: eff(5) }) }),
+      { today: '2026-08-18' },
+    );
+    assert.match(prose.remeasure.targets, /corrections at or under 3% of instructions/);
+  });
+
+  it('drops the target when neither window has a share', () => {
+    const prose = buildProse(
+      report_({ current: window_({ effectiveness: eff(null) }), prior: null }),
+      { today: '2026-08-18' },
+    );
+    assert.doesNotMatch(prose.remeasure.targets, /corrections at or under/);
+  });
+});
 
 describe('topLever', () => {
   it('picks the largest ceiling, not the first row', () => {
@@ -466,7 +551,7 @@ describe('buildProse — the re-measure', () => {
   it('lands N days out and re-runs at the same length', () => {
     const prose = buildProse(report_(), { today: TODAY });
     assert.equal(prose.remeasure.date, '2026-08-25');
-    assert.equal(prose.remeasure.command, 'ccalyze --habits 7d --html');
+    assert.equal(prose.remeasure.command, 'ccalyze --habits 7d');
   });
 
   it('reads the length off the window, not a default', () => {
@@ -478,7 +563,7 @@ describe('buildProse — the re-measure', () => {
       { today: TODAY },
     );
     assert.equal(prose.remeasure.date, '2026-09-17');
-    assert.equal(prose.remeasure.command, 'ccalyze --habits 30d --html');
+    assert.equal(prose.remeasure.command, 'ccalyze --habits 30d');
   });
 
   it('names numeric targets, so the advice has a destination', () => {

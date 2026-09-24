@@ -1,6 +1,6 @@
 ---
 name: ccalyze
-description: Analyze Claude Code usage patterns, cost, quota burn, and prompt-cache efficiency, and produce cost-aware behavioral insights about how you work. Use when user asks about token usage, costs, quota, spending, burn rate, rate limits, cache behaviour, wants usage insights, or wants to know how to improve how they use Claude Code. Triggers on: usage, cost, quota, spending, burn rate, tokens, ccalyze, insights, deep, insights fusion, how much did I use, why did I hit my limit, why was that so expensive, how do I improve my usage, what am I doing wrong, cache, cache hit rate, cache reads, cache misses, cache efficiency, why does my cache keep missing, cold start, context rebuild, why is my context being resent, does switching models cost me, is it cheaper to start a fresh session, why do I keep hitting my limit, did my habit change work, am I getting more efficient, compare this week to last week, habit tracking, --habits.
+description: Analyze Claude Code usage patterns, cost, quota burn, and prompt-cache efficiency, and produce cost-aware behavioral insights about how you work. Use when user asks about token usage, costs, quota, spending, burn rate, rate limits, cache behaviour, wants usage insights, or wants to know how to improve how they use Claude Code. Triggers on: usage, cost, quota, spending, burn rate, tokens, ccalyze, insights, deep, insights fusion, how much did I use, why did I hit my limit, why was that so expensive, how do I improve my usage, what am I doing wrong, cache, cache hit rate, cache reads, cache misses, cache efficiency, why does my cache keep missing, cold start, context rebuild, why is my context being resent, does switching models cost me, is it cheaper to start a fresh session, why do I keep hitting my limit, did my habit change work, am I getting more efficient, am I working effectively, how often do I correct Claude, how often do I interrupt Claude, tool errors, compare this week to last week, habit tracking, --habits.
 ---
 
 # ccalyze — Claude Code Usage Analyzer
@@ -219,13 +219,13 @@ be measurable later. Everything above describes one window; `--habits` compares 
 a lot more care to use correctly than Steps 1-4 do.
 
 Before running it, **Read `references/habits.md`** (next to this file) — it covers picking the
-window length, the refusal/warning cases, how to read the scorecard/headline/levers, the `--html`
-report page and how to publish it, and the common mistakes. Nothing here duplicates it, so skip
+window length, the refusal/warning cases, how to read the scorecard/headline/levers and the
+effectiveness rows, the report page and how to publish it, and the common mistakes. Nothing here duplicates it, so skip
 both the flag and the read for any request Steps 1-4 already answer.
 
-**Every `--habits` run writes a report page and you publish it.** The run drops one
-self-contained HTML file (conclusion and recommendations first, then the scorecard, figures and
-reading notes) at `~/.claude/ccalyze/habits-FROM_TO.html`, prints that path on stderr, and prints
+**Every `--habits` run writes a report page and you publish it** — always, without being asked,
+and there is no flag to skip it. The run drops one self-contained HTML file (conclusion and
+recommendations first, then the scorecard, the effectiveness table, figures and reading notes) at `~/.claude/ccalyze/habits-FROM_TO.html`, prints that path on stderr, and prints
 the JSON on stdout as always. Check the project labels, publish the file with the **Artifact**
 tool, and answer with the link plus one line of context — not with the JSON, and not with a
 re-narration of the page. `references/habits.md` has the label check and the publish steps.

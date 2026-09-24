@@ -110,7 +110,7 @@ function mergeUsage(existing: ParsedMessage, incoming: ParsedMessage): void {
  * within a file, applied again across files. `discoverSessionFiles` already drops
  * aliased paths, so this is a safety net: any other way the same message arrives
  * twice (hardlinks, a future change to discovery) still cannot double the cost.
- * `promptCount`/`transcriptSizeMB`/`autoCompactions` are not per-message, so they
+ * `promptCount`/`transcriptSizeMB`/`autoCompactions`/`interactions` are not per-message, so they
  * are guarded by skipping a `filePath` that has already contributed.
  *
  * Any new per-file scalar on `SessionParseResult` must be added to that summed
@@ -159,6 +159,7 @@ export function mergeSessions(sessions: EnrichedSession[]): EnrichedSession[] {
       // Counted once per transcript, so it merges here rather than by requestId.
       // Optional on transcripts predating the field; absent reads as zero.
       target.autoCompactions = (target.autoCompactions ?? 0) + (session.autoCompactions ?? 0);
+      target.interactions = [...(target.interactions ?? []), ...(session.interactions ?? [])];
     }
     for (const p of newPaths) {
       paths.add(p);

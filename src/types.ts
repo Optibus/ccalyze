@@ -153,6 +153,43 @@ export interface SessionSummary {
    * for whether it was iterating or thrashing.
    */
   reworkEdits: number;
+  /** How the conversation went, not what it cost — see {@link InteractionCounts}. */
+  interactions: InteractionCounts;
+}
+
+/**
+ * What happened between the person and Claude in one session, counted off the
+ * transcript's `type:"user"` lines — the effectiveness side of a session, where
+ * every other field is the consumption side.
+ *
+ * `SessionSummary.prompts` counts every `type:"user"` line, and most of those are
+ * tool results Claude Code files under the user role, not anything a person
+ * typed. These counts separate the two.
+ */
+export interface InteractionCounts {
+  /**
+   * Instructions the person actually typed: user text on the main thread, minus
+   * tool results, interrupt markers, auto-compact summaries, `isMeta` lines and
+   * the `<command-…>`/`<local-command-…>`/`<task-notification>` wrappers Claude
+   * Code injects.
+   */
+  instructions: number;
+  /** Instructions whose opening words push back on the last turn ("no, …", "that's wrong", "revert"). */
+  corrections: number;
+  /** `[Request interrupted by user…]` markers — the person stopped Claude mid-turn. */
+  interrupts: number;
+  /** `tool_result` blocks, main thread and subagents alike. */
+  toolResults: number;
+  /** Of those, the ones marked `is_error` — a failed command, a missing file, a denied permission. */
+  toolErrors: number;
+  /** Deduplicated API requests — the agent turns those instructions set off, subagents included. */
+  requests: number;
+}
+
+/** One classified `type:"user"` event, kept per event so a date filter can apply to it. */
+export interface Interaction {
+  timestamp: string;
+  kind: 'instruction' | 'correction' | 'interrupt' | 'tool-ok' | 'tool-error';
 }
 
 export interface CcalyzeOutput {
@@ -348,6 +385,11 @@ export interface HabitsWindow {
    */
   reworkShare: number;
   longRunningSessions: number;
+  /**
+   * How well the work flowed, as opposed to what it cost. Null rates mean the
+   * window had no typed instruction (or no tool call) to divide by.
+   */
+  effectiveness: HabitsEffectiveness;
   /** Share of the window's cost carried by its three priciest sessions. */
   top3Share: number;
   /**
@@ -383,11 +425,44 @@ export interface HabitsWindow {
  */
 export type HabitsVerdict = 'much better' | 'better' | 'flat' | 'worse' | 'no-baseline';
 
+/** The effectiveness figures of one window — see {@link InteractionCounts} for the counts. */
+export interface HabitsEffectiveness {
+  /** Typed instructions — the denominator of every rate below. */
+  instructions: number;
+  /** Agent turns per typed instruction: how much work one instruction sets off. Higher is better. */
+  turnsPerInstruction: number | null;
+  /** Consumption per typed instruction, in the report's unit. Lower is better. */
+  perInstruction: number | null;
+  /** Share of instructions that read as a correction, 0-100. Lower is better. */
+  correctionShare: number | null;
+  /** Interrupts per 100 instructions. Lower is better. */
+  interruptRate: number | null;
+  /** Share of tool calls that came back as an error, 0-100. Lower is better. */
+  toolErrorShare: number | null;
+}
+
 export interface HabitsScorecardRow {
   measure: string;
+  /**
+   * `consumption` rows are about what the work cost; `effectiveness` rows are
+   * about how well it went — whether instructions landed first time and tools
+   * worked. The page renders the two as separate tables.
+   */
+  group: 'consumption' | 'effectiveness';
   prior: number | null;
   current: number | null;
   verdict: HabitsVerdict;
+  /** How `prior`/`current` are denominated — `%`, `per 100`, a count, or the report's cost unit. */
+  unit: string;
+  /** Whether a smaller number is the improvement. The page reads this into a ▼/▲ badge. */
+  lowerIsBetter: boolean;
+  /**
+   * What "good" looks like, in one short phrase. Grounded in a real number where one
+   * exists — a threshold already used elsewhere in ccalyze, or a definitional floor of
+   * zero for a count of bad events — never a made-up industry benchmark. Says so plainly
+   * when no such number exists rather than inventing one.
+   */
+  target: string;
 }
 
 /** A sized, independently-derived estimate of what is still on the table. */

@@ -16,10 +16,12 @@ import {
   scorecard,
   spanDays,
   summarizeWindow,
+  summarizeEffectiveness,
   parseWeekendDays,
   validateWindowPair,
 } from './habits.ts';
 import type {
+  InteractionCounts,
   Anomaly,
   CcalyzeOutput,
   DateRange,
@@ -45,6 +47,7 @@ interface SessionSpec {
   compaction?: SessionSummary['compaction'];
   autoCompactions?: number;
   reworkEdits?: number;
+  interactions?: Partial<InteractionCounts>;
 }
 
 function session(spec: SessionSpec = {}): SessionSummary {
@@ -68,6 +71,15 @@ function session(spec: SessionSpec = {}): SessionSummary {
     compaction: spec.compaction ?? 'none',
     autoCompactions: spec.autoCompactions ?? 0,
     reworkEdits: spec.reworkEdits ?? 0,
+    interactions: {
+      instructions: 0,
+      corrections: 0,
+      interrupts: 0,
+      toolResults: 0,
+      toolErrors: 0,
+      requests: 0,
+      ...spec.interactions,
+    },
   };
 }
 
@@ -383,6 +395,41 @@ describe('summarizeWindow', () => {
   });
 });
 
+describe('summarizeEffectiveness', () => {
+  const counts = (over: Partial<InteractionCounts>) => session({ interactions: over });
+
+  it('divides by typed instructions, not by prompts', () => {
+    const e = summarizeEffectiveness(
+      [
+        counts({ instructions: 10, corrections: 1, interrupts: 1, requests: 120, toolResults: 50, toolErrors: 5 }),
+        counts({ instructions: 10, corrections: 1, interrupts: 0, requests: 80, toolResults: 50, toolErrors: 0 }),
+      ],
+      40,
+    );
+    assert.deepEqual(e, {
+      instructions: 20,
+      turnsPerInstruction: 10,
+      perInstruction: 2,
+      correctionShare: 10,
+      interruptRate: 5,
+      toolErrorShare: 5,
+    });
+  });
+
+  it('reads null rather than 0 when there is nothing to divide by', () => {
+    const e = summarizeEffectiveness([counts({ requests: 30 })], 10);
+    assert.equal(e.instructions, 0);
+    assert.equal(e.turnsPerInstruction, null);
+    assert.equal(e.correctionShare, null);
+    assert.equal(e.toolErrorShare, null);
+  });
+
+  it('lands on the window summary', () => {
+    const window = summarizeWindow(output({ sessions: [counts({ instructions: 4, requests: 40 })] }));
+    assert.equal(window.effectiveness.turnsPerInstruction, 10);
+  });
+});
+
 describe('parseWeekendDays', () => {
   it('reads three-letter day names, case and order insensitive', () => {
     assert.deepEqual(parseWeekendDays('fri,sat'), [5, 6]);
@@ -443,6 +490,31 @@ describe('scorecard', () => {
 
   const current = { from: '2026-08-10', to: '2026-08-16' };
   const prior = { from: '2026-08-03', to: '2026-08-09' };
+
+  it('groups the flow rows as effectiveness, the rest as consumption', () => {
+    const rows = scorecard(withPerPrompt(100, 100, current), withPerPrompt(100, 100, prior));
+    const flow = rows.filter((r) => r.group === 'effectiveness').map((r) => r.measure);
+    assert.deepEqual(flow, [
+      'Agent turns per typed instruction',
+      'Consumption per typed instruction',
+      'Instructions that correct the last turn (share)',
+      'Interrupts per 100 instructions',
+      'Tool calls that errored (share)',
+    ]);
+    assert.equal(rows[0].group, 'consumption');
+  });
+
+  it('reads more agent turns per instruction as better, more corrections as worse', () => {
+    const win = (range: DateRange, over: Partial<InteractionCounts>) =>
+      summarizeWindow(output({ range, sessions: [session({ interactions: over })] }));
+    const rows = scorecard(
+      win(current, { instructions: 10, requests: 200, corrections: 3 }),
+      win(prior, { instructions: 10, requests: 100, corrections: 1 }),
+    );
+    const byName = (m: string) => rows.find((r) => r.measure === m)!;
+    assert.equal(byName('Agent turns per typed instruction').verdict, 'much better');
+    assert.equal(byName('Instructions that correct the last turn (share)').verdict, 'worse');
+  });
 
   it('reads a sub-5% move as flat rather than booking it as a win', () => {
     const rows = scorecard(

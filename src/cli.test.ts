@@ -171,7 +171,6 @@ describe('parseArgs — habits', () => {
 describe('parseArgs — the report page', () => {
   it('writes a page for --habits without being asked', () => {
     const args = parseArgs(['--habits']);
-    assert.equal(args.html, true);
     assert.equal(args.htmlPath, undefined, 'no explicit path means the default location');
   });
 
@@ -183,7 +182,6 @@ describe('parseArgs — the report page', () => {
 
   it('leaves the path at the default when --html stands alone', () => {
     const args = parseArgs(['--habits', '--html']);
-    assert.equal(args.html, true);
     assert.equal(args.htmlPath, undefined);
   });
 
@@ -209,18 +207,13 @@ describe('parseArgs — the report page', () => {
     assert.throws(() => parseArgs(['--habits', '--html=']), /--html= needs a path/);
   });
 
-  it('turns the page off with --no-html', () => {
-    assert.equal(parseArgs(['--habits', '--no-html']).html, false);
+  it('refuses --no-html by name: the page is written on every --habits run', () => {
+    assert.throws(() => parseArgs(['--habits', '--no-html']), /--no-html was removed/);
+    assert.throws(() => parseArgs(['--habits', '--html', '--no-html']), /--no-html was removed/);
   });
 
-  it('refuses --html and --no-html together rather than picking one', () => {
-    assert.throws(() => parseArgs(['--habits', '--html', '--no-html']), /contradict each other/);
-  });
-
-  it('writes nothing for a normal run, and refuses either flag there', () => {
-    assert.equal(parseArgs(['7d']).html, true, 'the flag is habits-only; runHabits is the only reader');
+  it('writes nothing for a normal run, and refuses --html there', () => {
     assert.throws(() => parseArgs(['7d', '--html']), /--html applies to the --habits report/);
-    assert.throws(() => parseArgs(['7d', '--no-html']), /--no-html applies to the --habits report/);
   });
 });
 
