@@ -346,6 +346,51 @@ function projectCaptionText(report, unit) {
         `achievable target because it is the same person's own achieved rate, not a benchmark.` +
         `${thinNote(thin)}${stands}`);
 }
+/**
+ * The effectiveness section's lead: the current level of each flow measure, then
+ * which of them moved the wrong way. Quotes only `current.effectiveness` and the
+ * effectiveness scorecard rows.
+ */
+function effectivenessText(report) {
+    const e = report.current.effectiveness;
+    if (!e || !e.instructions) {
+        return ('No typed instruction was found in this window, so there is nothing to divide by. ' +
+            'Older transcripts may predate the fields these rows read.');
+    }
+    const parts = [];
+    const levels = [];
+    if (e.turnsPerInstruction !== null) {
+        levels.push(`each typed instruction set off ${e.turnsPerInstruction} agent turns`);
+    }
+    if (e.correctionShare !== null)
+        levels.push(`${e.correctionShare}% of instructions corrected the last turn`);
+    if (e.interruptRate !== null)
+        levels.push(`${e.interruptRate} interrupts per 100 instructions`);
+    if (e.toolErrorShare !== null)
+        levels.push(`${e.toolErrorShare}% of tool calls errored`);
+    parts.push(`Across ${n(e.instructions)} typed instructions, ${levels.join(', ')}. ` +
+        'These rows measure whether instructions landed first time, not what they cost.');
+    const rows = report.scorecard.filter((row) => row.group === 'effectiveness');
+    const worse = rows.filter((row) => row.verdict === 'worse');
+    const better = rows.filter((row) => row.verdict.endsWith('better'));
+    if (!report.prior) {
+        parts.push('With no prior window these are levels, not directions.');
+    }
+    else if (worse.length) {
+        parts.push(`Moved the wrong way: ${worse.map((row) => `${row.measure.toLowerCase()} (${move(row)})`).join('; ')}.`);
+        if (worse.some((row) => /correct|interrupt/i.test(row.measure))) {
+            parts.push('A rising correction or interrupt rate usually means instructions are arriving before ' +
+                'the task is pinned down — a sharper first message or a plan step is the usual fix.');
+        }
+    }
+    else if (better.length) {
+        parts.push(`Improved: ${better.map((row) => `${row.measure.toLowerCase()} (${move(row)})`).join('; ')}.`);
+    }
+    else {
+        parts.push('None moved beyond the 5% noise floor.');
+    }
+    return parts.join(' ');
+}
 function remeasureProse(report, lengthDays, today) {
     const { current, prior } = report;
     const targets = [];
@@ -363,6 +408,10 @@ function remeasureProse(report, lengthDays, today) {
         const aim = leverAim(lever);
         targets.push(`${aim.share}% of the window recovered from ${lever.lever}`);
     }
+    const correction = current.effectiveness?.correctionShare;
+    if (correction !== null && correction !== undefined) {
+        targets.push(`corrections at or under ${correction}% of instructions`);
+    }
     const sentence = `Targets: ${targets.join('; ')}. Re-run at the same length — a ${lengthDays}d run followed ` +
         `by a 30d one measures a different thing and cannot tell you whether the change held. ` +
         (prior
@@ -372,7 +421,7 @@ function remeasureProse(report, lengthDays, today) {
             : 'The next run is the first that can compare anything, because this one has no prior window.');
     return {
         date: shiftDate(today, lengthDays),
-        command: `ccalyze --habits ${lengthDays}d --html`,
+        command: `ccalyze --habits ${lengthDays}d`,
         targets: sentence,
     };
 }
@@ -398,6 +447,7 @@ export function buildProse(report, options = {}) {
         durationCaption: durationCaptionText(report, unit),
         modelCaption: modelCaptionText(report, unit),
         projectCaption: projectCaptionText(report, unit),
+        effectiveness: effectivenessText(report),
         remeasure: remeasureProse(report, lengthDays, today),
     };
 }

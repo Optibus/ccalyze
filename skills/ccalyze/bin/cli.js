@@ -81,9 +81,6 @@ export function parseArgs(argv) {
         habits: false,
         singleWindow: false,
         redactProjects: false,
-        // On by default for --habits: the page IS the report for a human reader, and
-        // a flag nobody knew to pass is a feature nobody uses.
-        html: true,
     };
     const aliases = {};
     const positional = [];
@@ -92,7 +89,6 @@ export function parseArgs(argv) {
     let weekendDays;
     let htmlPath;
     let htmlAsked = false;
-    let htmlOff = false;
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i];
         const name = arg.split('=')[0];
@@ -111,8 +107,10 @@ export function parseArgs(argv) {
         else if (name === '--redact-projects')
             flags.redactProjects = true;
         else if (name === '--no-html') {
-            flags.html = false;
-            htmlOff = true;
+            // Refused by name rather than as an unknown option: it used to exist, and
+            // someone reaching for it deserves to hear why it went away.
+            throw new Error('--no-html was removed: every --habits run writes the report page, because the page ' +
+                'is the report. stdout is still the JSON — redirect it if that is all you need.');
         }
         else if (name === '--unit') {
             const read = readValue(argv, i, '--unit');
@@ -170,14 +168,10 @@ export function parseArgs(argv) {
     const habitsLength = resolveHabitsLength(positional, flags.habits);
     // Refused rather than ignored: a normal run has no second window, no scorecard
     // and no levers, so there is no page to render — and a flag that appears to
-    // have worked while writing nothing is worse than one that says no. Same for
-    // --no-html, which would otherwise read as "this run was going to write one".
-    if (!flags.habits && (htmlAsked || htmlOff)) {
-        throw new Error(`${htmlOff ? '--no-html' : '--html'} applies to the --habits report; add --habits ` +
+    // have worked while writing nothing is worse than one that says no.
+    if (!flags.habits && htmlAsked) {
+        throw new Error('--html applies to the --habits report; add --habits ' +
             '(a normal run prints JSON and writes nothing)');
-    }
-    if (htmlOff && htmlAsked) {
-        throw new Error('--html and --no-html contradict each other; pass one');
     }
     if (positional.length === 2 && DATE_RE.test(positional[0]) && DATE_RE.test(positional[1])) {
         return {
@@ -302,6 +296,10 @@ export async function analyzeRange(claudeDir, range, deep) {
         sessions.push({
             ...parsed,
             messages: filteredMessages,
+            // Same window as the messages, so a session straddling the boundary
+            // between two --habits windows splits its instructions the way it splits
+            // its cost, instead of counting every one of them in both.
+            interactions: (parsed.interactions ?? []).filter(i => i.timestamp >= fromStr && i.timestamp < toEndStr),
             startTime,
             endTime,
             project,
@@ -343,14 +341,14 @@ async function runHabits(claudeDir, args) {
     // stdout stays JSON whether or not a page was written: it is the documented
     // contract every caller already pipes, and the page is an addition to it, not a
     // replacement. The path goes to stderr so `--habits > findings.json` still works.
-    if (args.html) {
-        const path = args.htmlPath
-            ? resolve(process.cwd(), args.htmlPath)
-            : defaultHabitsHtmlPath(report.current.range);
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, renderHabitsHtml(report), 'utf8');
-        console.error(`report: ${path}`);
-    }
+    // Unconditional: the page is the report a person reads, so there is no run of
+    // --habits that should end without one.
+    const path = args.htmlPath
+        ? resolve(process.cwd(), args.htmlPath)
+        : defaultHabitsHtmlPath(report.current.range);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, renderHabitsHtml(report), 'utf8');
+    console.error(`report: ${path}`);
     console.log(JSON.stringify(report, null, 2));
 }
 /**
@@ -379,9 +377,9 @@ Options:
 
 Habits — compares the last N complete days against the N before them:
   --habits [Nd]             window LENGTH, not a date range (default 7d)
-  --html [PATH]             where to write the report page
-                            (default ~/${HABITS_HTML_DIR.join('/')}/habits-FROM_TO.html)
-  --no-html                 skip the page; print the JSON only
+  --html PATH               where to write the report page, which every
+                            run writes (default
+                            ~/${HABITS_HTML_DIR.join('/')}/habits-FROM_TO.html)
   --single-window           describe one window; no comparison
   --unit NAME               what to call the cost figure (default "units")
   --top N                   projects in the table (default 8)
