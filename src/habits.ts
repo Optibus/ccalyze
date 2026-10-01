@@ -554,7 +554,7 @@ export function scorecard(
     get: (window: HabitsWindow) => number | null,
     rowUnit: string,
     target: string,
-    lowerIsBetter = true,
+    lowerIsBetter: boolean | null = true,
     group: HabitsScorecardRow['group'] = 'consumption',
   ): HabitsScorecardRow => {
     const a = prior ? get(prior) : null;
@@ -562,7 +562,9 @@ export function scorecard(
     let verdict: HabitsVerdict = 'no-baseline';
     if (a !== null && b !== null) {
       const move = a ? Math.abs(b - a) / Math.abs(a) : b === a ? 0 : 1;
-      if (move < NOISE_FLOOR) {
+      if (lowerIsBetter === null || move < NOISE_FLOOR) {
+        // A directionless row never books a win or a loss: it is a level to read
+        // beside the rows that give it meaning.
         verdict = 'flat';
       } else {
         const improved = lowerIsBetter ? b < a : b > a;
@@ -645,8 +647,8 @@ export function scorecard(
       'Agent turns per typed instruction',
       (w) => w.effectiveness?.turnsPerInstruction ?? null,
       'turns',
-      'No fixed target — higher means each instruction did more work. Read it beside corrections and interrupts, since a runaway loop looks the same.',
-      false,
+      'No direction — more turns can be a runaway loop or more work done per instruction, and it moves with consumption per instruction. Read it as a level, beside corrections and interrupts.',
+      null,
       'effectiveness',
     ),
     row(

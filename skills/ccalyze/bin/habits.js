@@ -452,7 +452,9 @@ export function scorecard(current, prior, unit = 'units') {
         let verdict = 'no-baseline';
         if (a !== null && b !== null) {
             const move = a ? Math.abs(b - a) / Math.abs(a) : b === a ? 0 : 1;
-            if (move < NOISE_FLOOR) {
+            if (lowerIsBetter === null || move < NOISE_FLOOR) {
+                // A directionless row never books a win or a loss: it is a level to read
+                // beside the rows that give it meaning.
                 verdict = 'flat';
             }
             else {
@@ -478,7 +480,7 @@ export function scorecard(current, prior, unit = 'units') {
         row('Most-expensive-model share of consumption', (w) => w.modelCostShare[0]?.costShare ?? null, '%', 'No fixed target — depends how much of the work genuinely needs the expensive model.'),
         // Effectiveness: did the work go well, not what did it cost. `?.` because a
         // report built before these fields existed carries no `effectiveness` block.
-        row('Agent turns per typed instruction', (w) => w.effectiveness?.turnsPerInstruction ?? null, 'turns', 'No fixed target — higher means each instruction did more work. Read it beside corrections and interrupts, since a runaway loop looks the same.', false, 'effectiveness'),
+        row('Agent turns per typed instruction', (w) => w.effectiveness?.turnsPerInstruction ?? null, 'turns', 'No direction — more turns can be a runaway loop or more work done per instruction, and it moves with consumption per instruction. Read it as a level, beside corrections and interrupts.', null, 'effectiveness'),
         row('Consumption per typed instruction', (w) => w.effectiveness?.perInstruction ?? null, unit, NO_TARGET, true, 'effectiveness'),
         row('Instructions that correct the last turn (share)', (w) => w.effectiveness?.correctionShare ?? null, '%', '0% is ideal — every correction means a redo.', true, 'effectiveness'),
         row('Interrupts per 100 instructions', (w) => w.effectiveness?.interruptRate ?? null, 'per 100', '0 is ideal — every interrupt means the agent went off track.', true, 'effectiveness'),

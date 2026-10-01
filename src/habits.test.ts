@@ -504,7 +504,7 @@ describe('scorecard', () => {
     assert.equal(rows[0].group, 'consumption');
   });
 
-  it('reads more agent turns per instruction as better, more corrections as worse', () => {
+  it('gives agent turns per instruction no direction, while corrections still read worse', () => {
     const win = (range: DateRange, over: Partial<InteractionCounts>) =>
       summarizeWindow(output({ range, sessions: [session({ interactions: over })] }));
     const rows = scorecard(
@@ -512,7 +512,15 @@ describe('scorecard', () => {
       win(prior, { instructions: 10, requests: 100, corrections: 1 }),
     );
     const byName = (m: string) => rows.find((r) => r.measure === m)!;
-    assert.equal(byName('Agent turns per typed instruction').verdict, 'much better');
+    const turns = byName('Agent turns per typed instruction');
+    assert.equal(turns.verdict, 'flat');
+    assert.equal(turns.lowerIsBetter, null);
+    // The reverse move must not read as a regression either.
+    const reversed = scorecard(
+      win(current, { instructions: 10, requests: 100, corrections: 1 }),
+      win(prior, { instructions: 10, requests: 200, corrections: 3 }),
+    );
+    assert.equal(reversed.find((r) => r.measure === 'Agent turns per typed instruction')!.verdict, 'flat');
     assert.equal(byName('Instructions that correct the last turn (share)').verdict, 'worse');
   });
 

@@ -388,8 +388,8 @@ ${embedFindings(report)}
   // groups existed) stays in the consumption table. Rows from an older report
   // carry no unit/direction/target — fall back rather than print "undefined".
   const rowHtml = r => {
-    const dir = r.lowerIsBetter === false
-      ? ["▲", "Higher is better"] : ["▼", "Lower is better"];
+    const dir = r.lowerIsBetter === null ? ["◆", "No direction — read as a level"]
+      : r.lowerIsBetter === false ? ["▲", "Higher is better"] : ["▼", "Lower is better"];
     return \`<tr><th scope="row">
         <span class="dir" title="\${dir[1]}" aria-label="\${dir[1]}">\${dir[0]}</span> \${r.measure}
       </th>

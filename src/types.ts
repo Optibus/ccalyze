@@ -429,7 +429,7 @@ export type HabitsVerdict = 'much better' | 'better' | 'flat' | 'worse' | 'no-ba
 export interface HabitsEffectiveness {
   /** Typed instructions — the denominator of every rate below. */
   instructions: number;
-  /** Agent turns per typed instruction: how much work one instruction sets off. Higher is better. */
+  /** Agent turns per typed instruction: how much work one instruction sets off. Directionless: scored `flat`, read as a level. */
   turnsPerInstruction: number | null;
   /** Consumption per typed instruction, in the report's unit. Lower is better. */
   perInstruction: number | null;
@@ -454,8 +454,12 @@ export interface HabitsScorecardRow {
   verdict: HabitsVerdict;
   /** How `prior`/`current` are denominated — `%`, `per 100`, a count, or the report's cost unit. */
   unit: string;
-  /** Whether a smaller number is the improvement. The page reads this into a ▼/▲ badge. */
-  lowerIsBetter: boolean;
+  /**
+   * Whether a smaller number is the improvement. The page reads this into a ▼/▲ badge.
+   * `null` means the row has no direction: it reports a level and its verdict is always
+   * `flat`, because its movement can be good or bad depending on the rows beside it.
+   */
+  lowerIsBetter: boolean | null;
   /**
    * What "good" looks like, in one short phrase. Grounded in a real number where one
    * exists — a threshold already used elsewhere in ccalyze, or a definitional floor of
