@@ -86,7 +86,11 @@ function shiftDate(date: string, days: number): string {
 }
 
 function rowsWith(report: HabitsReport, ...verdicts: string[]): HabitsScorecardRow[] {
-  return report.scorecard.filter((row) => verdicts.includes(row.verdict));
+  // A row that reaches its target reads GOOD on the page, so it is never listed as
+  // having moved the wrong way, whatever the trend against the prior window was.
+  return report.scorecard.filter(
+    (row) => verdicts.includes(row.verdict) && !(row.verdict === 'worse' && row.goalMet),
+  );
 }
 
 /** The largest lever, or null when nothing in the data sizes above zero. */
@@ -473,7 +477,7 @@ function effectivenessText(report: HabitsReport): string {
   );
 
   const rows = report.scorecard.filter((row) => row.group === 'effectiveness');
-  const worse = rows.filter((row) => row.verdict === 'worse');
+  const worse = rows.filter((row) => row.verdict === 'worse' && !row.goalMet);
   const better = rows.filter((row) => row.verdict.endsWith('better'));
   if (!report.prior) {
     parts.push('With no prior window these are levels, not directions.');

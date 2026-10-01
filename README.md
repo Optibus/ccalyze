@@ -121,6 +121,11 @@ Every effectiveness rate divides by the instructions a person actually **typed**
 `prompts`, most of which are tool results Claude Code files under the user role. A sub-5% move reads `flat`, not `better` — a scorecard that books noise as a win stops
 being worth reading.
 
+A row with a numeric target (0% auto-compacted, 90%+ cache-read, under 40% flagged, ...) also gets
+`goalMet`, and the page shows **GOOD** in green when it is reached, whatever the trend was. Every
+row carries an `about` text, shown in a collapsible under the measure, that says what it means in
+day-to-day work.
+
 Two things it deliberately refuses:
 
 - **A date range.** The window *length* is settable; the endpoints are not. ccalyze picks them,

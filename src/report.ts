@@ -79,7 +79,7 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
     --bg:#FAFBFF; --panel:#FFFFFF; --panel-2:#F1F5FF;
     --ink:#171717; --ink-2:#3F4763; --ink-3:#7A82A0;
     --rule:#DCE4FA; --rule-2:#EDF1FE; --brand:#2D1DA3;
-    --better:#2D1DA3; --worse:#FF2C95; --flat:#7A82A0; --watch:#FFA015;
+    --better:#2D1DA3; --worse:#FF2C95; --flat:#7A82A0; --watch:#FFA015; --good:#15803D;
     --font:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
     --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
     --s1:.3rem; --s2:.55rem; --s3:.9rem; --s4:1.25rem; --s5:1.8rem; --s6:2.4rem;
@@ -87,15 +87,15 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
   @media (prefers-color-scheme:dark){:root{
     --a:#5C86FF; --b:#F53F94; --bg:#271066; --panel:#311878; --panel-2:#3A2089;
     --ink:#FFF; --ink-2:#D3DAFF; --ink-3:#A79DE6; --rule:#4B2F9E; --rule-2:#402888;
-    --brand:#CDDBFF; --better:#8FB0FF; --worse:#F53F94; --flat:#A79DE6; --watch:#FFA941;}}
+    --brand:#CDDBFF; --better:#8FB0FF; --worse:#F53F94; --flat:#A79DE6; --watch:#FFA941; --good:#4ADE80;}}
   :root[data-theme="dark"]{
     --a:#5C86FF; --b:#F53F94; --bg:#271066; --panel:#311878; --panel-2:#3A2089;
     --ink:#FFF; --ink-2:#D3DAFF; --ink-3:#A79DE6; --rule:#4B2F9E; --rule-2:#402888;
-    --brand:#CDDBFF; --better:#8FB0FF; --worse:#F53F94; --flat:#A79DE6; --watch:#FFA941;}
+    --brand:#CDDBFF; --better:#8FB0FF; --worse:#F53F94; --flat:#A79DE6; --watch:#FFA941; --good:#4ADE80;}
   :root[data-theme="light"]{
     --a:#396DFF; --b:#FF2C95; --bg:#FAFBFF; --panel:#FFF; --panel-2:#F1F5FF;
     --ink:#171717; --ink-2:#3F4763; --ink-3:#7A82A0; --rule:#DCE4FA; --rule-2:#EDF1FE;
-    --brand:#2D1DA3; --better:#2D1DA3; --worse:#FF2C95; --flat:#7A82A0; --watch:#FFA015;}
+    --brand:#2D1DA3; --better:#2D1DA3; --worse:#FF2C95; --flat:#7A82A0; --watch:#FFA015; --good:#15803D;}
 
   *{box-sizing:border-box}
   body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15.5px;line-height:1.52;margin:0;-webkit-font-smoothing:antialiased}
@@ -134,7 +134,7 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
   @media (max-width:940px){.rec{grid-template-columns:1.9rem minmax(0,1fr) 7.6rem}.rec .ev{grid-column:2;grid-row:2}}
   @media (max-width:620px){.rec{grid-template-columns:1.9rem minmax(0,1fr)}.rec .size{grid-column:2;text-align:left;align-items:flex-start}}
   .chip{display:inline-flex;align-items:center;gap:.35em;font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:.25em .6em;border:1.5px solid currentColor;border-radius:3px;white-space:nowrap}
-  .chip.ok{color:var(--better)}.chip.no{color:var(--worse)}.chip.mid{color:var(--watch)}.chip.nil{color:var(--flat)}
+  .chip.good{color:var(--good)}.chip.ok{color:var(--better)}.chip.no{color:var(--worse)}.chip.mid{color:var(--watch)}.chip.nil{color:var(--flat)}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:4px;overflow:hidden}
   .stat{background:var(--panel);padding:var(--s3) var(--s4);display:flex;flex-direction:column;gap:var(--s1)}
   .stat .k{font-size:.68rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
@@ -169,6 +169,12 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
   tbody th{font-weight:500;color:var(--ink)}
   td.num{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink-2);font-weight:500}
   td.target{color:var(--ink-3);font-size:.82rem;max-width:26ch}
+  details.about{margin:.35rem 0 0 1.25rem;font-weight:400}
+  details.about summary{cursor:pointer;font-size:.74rem;color:var(--ink-3);list-style:revert}
+  details.about summary:hover{color:var(--ink)}
+  details.about .body{margin-top:.4rem;max-width:62ch}
+  details.about .body p{font-size:.82rem;line-height:1.5;color:var(--ink-2);max-width:none}
+  details.about .body p+p{margin-top:.5rem}
   .dir{display:inline-block;color:var(--ink-3);font-size:.8em;cursor:help}
   tbody tr:hover{background:var(--panel-2)}
   .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:var(--s3) var(--s4)}
@@ -361,7 +367,7 @@ ${embedFindings(report)}
   else chips.push(["mid", "Conclusion · mixed"]);
   if (pri) {
     const improved = D.scorecard.filter(r => (r.verdict || "").endsWith("better")).length;
-    const worse = D.scorecard.filter(r => r.verdict === "worse").length;
+    const worse = D.scorecard.filter(r => r.verdict === "worse" && !r.goalMet).length;
     chips.push(worse > improved ? ["no", \`\${worse} measures worse\`]
                                 : ["nil", \`\${improved} measures improved, \${worse} worse\`]);
   }
@@ -399,16 +405,21 @@ ${embedFindings(report)}
   // Two tables from one scorecard: a row without a group (a report written before
   // groups existed) stays in the consumption table. Rows from an older report
   // carry no unit/direction/target — fall back rather than print "undefined".
+  const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const aboutHtml = text => !text ? "" :
+    \`<details class="about"><summary>What this means</summary><div class="body">\${
+      text.split("\\n\\n").map(p => \`<p>\${esc(p)}</p>\`).join("")}</div></details>\`;
   const rowHtml = r => {
     const dir = r.lowerIsBetter === null ? ["◆", "No direction — read as a level"]
       : r.lowerIsBetter === false ? ["▲", "Higher is better"] : ["▼", "Lower is better"];
     return \`<tr><th scope="row">
         <span class="dir" title="\${dir[1]}" aria-label="\${dir[1]}">\${dir[0]}</span> \${r.measure}
+        \${aboutHtml(r.about)}
       </th>
       <td class="num">\${withUnit(r.prior, r.unit)}</td>
       <td class="num">\${withUnit(r.current, r.unit)}</td>
       <td class="target">\${r.target || "—"}</td>
-      <td><span class="chip \${chipFor(r.verdict)}">\${r.verdict}</span></td></tr>\`;
+      <td><span class="chip \${r.goalMet ? "good" : chipFor(r.verdict)}" \${r.goalMet ? \`title="Reaches the target. Trend against the earlier window: \${r.verdict}"\` : ""}>\${r.goalMet ? "good" : r.verdict}</span></td></tr>\`;
   };
   document.getElementById("scorecard").innerHTML =
     D.scorecard.filter(r => r.group !== "effectiveness").map(rowHtml).join("");

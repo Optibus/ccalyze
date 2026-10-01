@@ -13,6 +13,7 @@ import {
   pct,
   ratioDelta,
   resolveHabitWindows,
+  meetsGoal,
   scorecard,
   spanDays,
   summarizeWindow,
@@ -26,6 +27,7 @@ import type {
   CcalyzeOutput,
   DateRange,
   DaySummary,
+  HabitsWindow,
   ModelSummary,
   ProjectSummary,
   SessionFlag,
@@ -945,5 +947,75 @@ describe('buildHabitsReport', () => {
         ),
       HabitsRefusal,
     );
+  });
+});
+
+describe('scorecard goals and explanations', () => {
+  const current = { from: '2026-08-10', to: '2026-08-16' };
+  const prior = { from: '2026-08-03', to: '2026-08-09' };
+  const rows = (cur: Partial<HabitsWindow>, pri: Partial<HabitsWindow> = {}) => {
+    const w = (range: DateRange, over: Partial<HabitsWindow>) => ({
+      ...summarizeWindow(output({ range, sessions: [session({ costUSD: 5, prompts: 10 })] })),
+      ...over,
+    });
+    return scorecard(w(current, cur), w(prior, pri));
+  };
+  const byName = (rs: ReturnType<typeof scorecard>, m: string) => rs.find((r) => r.measure === m)!;
+
+  it('meetsGoal covers at-most, at-least and under, inclusive where it says so', () => {
+    assert.equal(meetsGoal(0, { op: 'atMost', value: 0 }), true);
+    assert.equal(meetsGoal(0.1, { op: 'atMost', value: 0 }), false);
+    assert.equal(meetsGoal(90, { op: 'atLeast', value: 90 }), true);
+    assert.equal(meetsGoal(89.9, { op: 'atLeast', value: 90 }), false);
+    assert.equal(meetsGoal(40, { op: 'under', value: 40 }), false);
+    assert.equal(meetsGoal(39.9, { op: 'under', value: 40 }), true);
+  });
+
+  it('marks a row met only when current reaches the target, whatever the trend was', () => {
+    const rs = rows({ noCompactionShare: 0, cacheReadShare: 91 }, { noCompactionShare: 0, cacheReadShare: 99 });
+    // Cache fell 8% (worse), but 91% still reaches the 90% target.
+    assert.equal(byName(rs, 'Cache-read share of input tokens').verdict, 'worse');
+    assert.equal(byName(rs, 'Cache-read share of input tokens').goalMet, true);
+    assert.equal(byName(rs, 'Sessions with no /compact (share)').goalMet, true);
+  });
+
+  it('marks a row not met when it misses the target', () => {
+    const rs = rows({ autoCompactionShare: 2, cacheReadShare: 80 });
+    assert.equal(byName(rs, 'Sessions auto-compacted, hit the wall (share)').goalMet, false);
+    assert.equal(byName(rs, 'Cache-read share of input tokens').goalMet, false);
+  });
+
+  it('leaves goalMet null on rows whose target text says there is none', () => {
+    const rs = rows({});
+    for (const m of [
+      'Consumption per prompt',
+      'Top-three session concentration',
+      'Off-hours share (nights + weekends)',
+      'Sessions with repeated same-file edits (share)',
+      'Agent turns per typed instruction',
+      'Tool calls that errored (share)',
+    ]) {
+      assert.equal(byName(rs, m).goalMet, null, m);
+    }
+  });
+
+  it('judges the goal on a single window too, where there is no prior to compare', () => {
+    const only = scorecard(
+      { ...summarizeWindow(output({ range: current, sessions: [session({})] })), noCompactionShare: 0 },
+      null,
+    );
+    assert.equal(byName(only, 'Sessions with no /compact (share)').verdict, 'no-baseline');
+    assert.equal(byName(only, 'Sessions with no /compact (share)').goalMet, true);
+  });
+
+  it('gives every row an explanation', () => {
+    for (const r of rows({})) assert.ok(r.about && r.about.length > 40, `${r.measure} has an explanation`);
+  });
+
+  it('explains what large means and why the wall is too late', () => {
+    const rs = rows({});
+    assert.match(byName(rs, 'Sessions with no /compact (share)').about!, /30 or more prompts/);
+    assert.match(byName(rs, 'Sessions with no /compact (share)').about!, /200K/);
+    assert.match(byName(rs, 'Sessions auto-compacted, hit the wall (share)').about!, /too late/);
   });
 });

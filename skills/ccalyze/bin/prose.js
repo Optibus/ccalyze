@@ -35,7 +35,9 @@ function shiftDate(date, days) {
     return new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 function rowsWith(report, ...verdicts) {
-    return report.scorecard.filter((row) => verdicts.includes(row.verdict));
+    // A row that reaches its target reads GOOD on the page, so it is never listed as
+    // having moved the wrong way, whatever the trend against the prior window was.
+    return report.scorecard.filter((row) => verdicts.includes(row.verdict) && !(row.verdict === 'worse' && row.goalMet));
 }
 /** The largest lever, or null when nothing in the data sizes above zero. */
 export function topLever(report) {
@@ -362,7 +364,7 @@ function effectivenessText(report) {
     parts.push(`Across ${n(e.instructions)} typed instructions, ${levels.join(', ')}. ` +
         'These rows measure whether instructions landed first time, not what they cost.');
     const rows = report.scorecard.filter((row) => row.group === 'effectiveness');
-    const worse = rows.filter((row) => row.verdict === 'worse');
+    const worse = rows.filter((row) => row.verdict === 'worse' && !row.goalMet);
     const better = rows.filter((row) => row.verdict.endsWith('better'));
     if (!report.prior) {
         parts.push('With no prior window these are levels, not directions.');

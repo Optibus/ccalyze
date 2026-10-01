@@ -30,6 +30,7 @@ import type {
   SessionSummary,
 } from './types.ts';
 import { LOW_CACHE_RATIO_THRESHOLD } from './anomalies.ts';
+import { ABOUT } from './habits-about.ts';
 
 /**
  * Flags describing *behaviour*.
@@ -543,6 +544,18 @@ const NO_TARGET = 'No fixed target — compare the trend across windows, not the
 const CACHE_TARGET = `${Math.round(LOW_CACHE_RATIO_THRESHOLD * 100)}%+ (healthy sessions run 90-99%)`;
 const FLAGGED_TARGET = `Under ${FLAGGED_SHARE_TARGET}% of the window`;
 
+/** A numeric "what good looks like": reached when `current` is at most / at least / under `value`. */
+export interface Goal {
+  op: 'atMost' | 'atLeast' | 'under';
+  value: number;
+}
+
+export function meetsGoal(value: number, goal: Goal): boolean {
+  if (goal.op === 'atMost') return value <= goal.value;
+  if (goal.op === 'atLeast') return value >= goal.value;
+  return value < goal.value;
+}
+
 /** Mechanical verdicts. `better`/`worse` about a number, never about a person. */
 export function scorecard(
   current: HabitsWindow,
@@ -556,6 +569,7 @@ export function scorecard(
     target: string,
     lowerIsBetter: boolean | null = true,
     group: HabitsScorecardRow['group'] = 'consumption',
+    extra: { goal?: Goal; about?: string } = {},
   ): HabitsScorecardRow => {
     const a = prior ? get(prior) : null;
     const b = get(current);
@@ -571,75 +585,127 @@ export function scorecard(
         verdict = improved ? (move >= STRONG_MOVE ? 'much better' : 'better') : 'worse';
       }
     }
-    return { measure, group, prior: a, current: b, verdict, unit: rowUnit, lowerIsBetter, target };
+    const goalMet = b === null || !extra.goal ? null : meetsGoal(b, extra.goal);
+    return {
+      measure,
+      group,
+      prior: a,
+      current: b,
+      verdict,
+      goalMet,
+      unit: rowUnit,
+      lowerIsBetter,
+      target,
+      about: extra.about,
+    };
   };
 
   return [
-    row('Consumption per prompt', (w) => w.perPrompt, unit, NO_TARGET),
+    row('Consumption per prompt', (w) => w.perPrompt, unit, NO_TARGET, true, 'consumption', {
+      about: ABOUT.perPrompt,
+    }),
     row(
       'Cold-start premium, share of total',
       (w) => w.coldStart.share,
       '%',
       '0% — every cold rebuild is avoidable by not leaving a big session idle for an hour.',
+      true,
+      'consumption',
+      { goal: { op: 'atMost', value: 0 }, about: ABOUT.coldShare },
     ),
     row(
       'Sessions resumed cold after an idle gap',
       (w) => w.coldStart.sessions,
       'sessions',
       '0 sessions, for the same reason.',
+      true,
+      'consumption',
+      { goal: { op: 'atMost', value: 0 }, about: ABOUT.coldSessions },
     ),
     row(
       'Share carried by sessions over 24 h',
       over24hShare,
       '%',
       'No fixed target — high is fine if the work genuinely spans days.',
+      true,
+      'consumption',
+      { about: ABOUT.over24h },
     ),
     row(
       'Top-three session concentration',
       (w) => w.top3Share,
       '%',
       'No fixed target — watch for a sudden spike concentrated in one or two sessions.',
+      true,
+      'consumption',
+      { about: ABOUT.top3 },
     ),
-    row('Off-hours share (nights + weekends)', (w) => w.offHoursShare, '%',
+    row(
+      'Off-hours share (nights + weekends)',
+      (w) => w.offHoursShare,
+      '%',
       'No fixed target — this is a burnout signal, not a cost one.',
+      true,
+      'consumption',
+      { about: ABOUT.offHours },
     ),
-    row('Cache-read share of input tokens', (w) => w.cacheReadShare, '%', CACHE_TARGET, false),
+    row('Cache-read share of input tokens', (w) => w.cacheReadShare, '%', CACHE_TARGET, false, 'consumption', {
+      goal: { op: 'atLeast', value: Math.round(LOW_CACHE_RATIO_THRESHOLD * 100) },
+      about: ABOUT.cacheRead,
+    }),
     row(
       'Subagent delegation, share of input tokens',
       (w) => w.subagentTokenShare,
       '%',
       'No fixed target — higher just means more work ran through subagents.',
       false,
+      'consumption',
+      { about: ABOUT.subagent },
     ),
     row(
       'Sessions with no /compact (share)',
       (w) => w.noCompactionShare,
       '%',
       '0% — every session that grows large should get a /compact before it does.',
+      true,
+      'consumption',
+      { goal: { op: 'atMost', value: 0 }, about: ABOUT.noCompact },
     ),
     row(
       'Sessions auto-compacted, hit the wall (share)',
       (w) => w.autoCompactionShare,
       '%',
       '0% — hitting the wall means /compact came too late.',
+      true,
+      'consumption',
+      { goal: { op: 'atMost', value: 0 }, about: ABOUT.autoCompact },
     ),
     row(
       'Sessions with repeated same-file edits (share)',
       (w) => w.reworkShare,
       '%',
       NO_TARGET + ' This can be healthy iteration as easily as thrashing.',
+      true,
+      'consumption',
+      { about: ABOUT.rework },
     ),
     row(
       'Share in sessions carrying a behavioural flag',
       (w) => w.flagged.costShare,
       '%',
       FLAGGED_TARGET,
+      true,
+      'consumption',
+      { goal: { op: 'under', value: FLAGGED_SHARE_TARGET }, about: ABOUT.flagged },
     ),
     row(
       'Most-expensive-model share of consumption',
       (w) => w.modelCostShare[0]?.costShare ?? null,
       '%',
       'No fixed target — depends how much of the work genuinely needs the expensive model.',
+      true,
+      'consumption',
+      { about: ABOUT.topModel },
     ),
     // Effectiveness: did the work go well, not what did it cost. `?.` because a
     // report built before these fields existed carries no `effectiveness` block.
@@ -650,6 +716,7 @@ export function scorecard(
       'No direction — more turns can be a runaway loop or more work done per instruction, and it moves with consumption per instruction. Read it as a level, beside corrections and interrupts.',
       null,
       'effectiveness',
+      { about: ABOUT.turns },
     ),
     row(
       'Consumption per typed instruction',
@@ -658,6 +725,7 @@ export function scorecard(
       NO_TARGET,
       true,
       'effectiveness',
+      { about: ABOUT.perInstruction },
     ),
     row(
       'Instructions that correct the last turn (share)',
@@ -666,6 +734,7 @@ export function scorecard(
       '0% is ideal — every correction means a redo.',
       true,
       'effectiveness',
+      { goal: { op: 'atMost', value: 0 }, about: ABOUT.corrections },
     ),
     row(
       'Interrupts per 100 instructions',
@@ -674,6 +743,7 @@ export function scorecard(
       '0 is ideal — every interrupt means the agent went off track.',
       true,
       'effectiveness',
+      { goal: { op: 'atMost', value: 0 }, about: ABOUT.interrupts },
     ),
     row(
       'Tool calls that errored (share)',
@@ -682,6 +752,7 @@ export function scorecard(
       'As close to 0% as practical — denied permissions count too, so it never quite reaches 0.',
       true,
       'effectiveness',
+      { about: ABOUT.toolErrors },
     ),
   ];
 }

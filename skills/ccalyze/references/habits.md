@@ -145,7 +145,10 @@ not in the data.
 
 The scorecard's verdicts are mechanical, and about a number rather than a person: a sub-5%
 relative move reads `flat`, not `better`, because a scorecard that books noise as a win stops
-being worth reading. `levers` sizes what is left — the model-mix ceiling assumes every
+being worth reading. A row with a numeric target (0% auto-compacted, 90%+ cache-read, and so
+on) also carries `goalMet`; the page then reads **GOOD**, in green, whatever the trend was, and
+every row carries an `about` paragraph that the page shows in a collapsible under the measure.
+`levers` sizes what is left — the model-mix ceiling assumes every
 expensive-model prompt was avoidable, which it is not, so quote `realistic` (a third) as the band
 worth aiming at.
 

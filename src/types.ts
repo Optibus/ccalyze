@@ -452,6 +452,18 @@ export interface HabitsScorecardRow {
   prior: number | null;
   current: number | null;
   verdict: HabitsVerdict;
+  /**
+   * Whether `current` reaches the "what good looks like" target. `null` when the row
+   * has no numeric target (its `target` text says so). The page shows GOOD in green
+   * whenever this is true, whatever the trend against the prior window was.
+   */
+  goalMet?: boolean | null;
+  /**
+   * What the measure means in everyday terms, shown in a collapsible under the
+   * measure's name. Plain paragraphs separated by a blank line. Absent on a report
+   * written before this existed.
+   */
+  about?: string;
   /** How `prior`/`current` are denominated — `%`, `per 100`, a count, or the report's cost unit. */
   unit: string;
   /**
