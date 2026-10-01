@@ -346,9 +346,16 @@ async function runHabits(claudeDir, args) {
     const path = args.htmlPath
         ? resolve(process.cwd(), args.htmlPath)
         : defaultHabitsHtmlPath(report.current.range);
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, renderHabitsHtml(report), 'utf8');
-    console.error(`report: ${path}`);
+    // The page is a side artifact: an unwritable path (read-only $HOME, a container, a
+    // typo'd --html) must not throw away an analysis that already completed.
+    try {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, renderHabitsHtml(report), 'utf8');
+        console.error(`report: ${path}`);
+    }
+    catch (err) {
+        console.error(`warning: could not write the report page to ${path}: ${err.message}`);
+    }
     console.log(JSON.stringify(report, null, 2));
 }
 /**
