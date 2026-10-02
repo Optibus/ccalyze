@@ -1,4 +1,31 @@
 import { computeCost, resolveModelPricing } from "./cost.js";
+/**
+ * Tally a session's classified user events. A correction is also an
+ * instruction — it is one the person typed — so it counts in both.
+ */
+export function countInteractions(session) {
+    const counts = {
+        instructions: 0,
+        corrections: 0,
+        interrupts: 0,
+        toolResults: 0,
+        toolErrors: 0,
+        requests: session.messages.length,
+    };
+    for (const { kind } of session.interactions ?? []) {
+        if (kind === 'instruction' || kind === 'correction')
+            counts.instructions++;
+        if (kind === 'correction')
+            counts.corrections++;
+        if (kind === 'interrupt')
+            counts.interrupts++;
+        if (kind === 'tool-ok' || kind === 'tool-error')
+            counts.toolResults++;
+        if (kind === 'tool-error')
+            counts.toolErrors++;
+    }
+    return counts;
+}
 /** Cap on prompt-display strings emitted per session in --deep mode. */
 export const DEEP_MAX_PROMPT_DISPLAYS = 150;
 /**
@@ -291,6 +318,7 @@ export function aggregate(sessions, history, range, deep = false) {
             if (count > 1)
                 reworkEdits += count - 1;
         }
+        const interactions = countInteractions(session);
         sessionSummaries.push({
             id: session.sessionId,
             name: sessionNames.get(session.sessionId) ?? '',
@@ -309,6 +337,7 @@ export function aggregate(sessions, history, range, deep = false) {
             compaction,
             autoCompactions,
             reworkEdits,
+            interactions,
         });
     }
     const totalInputSideTokens = summary.totalInputTokens + summary.totalCacheReadTokens + summary.totalCacheWriteTokens;

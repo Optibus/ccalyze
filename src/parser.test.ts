@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parseSessionFile, parseHistoryFile } from './parser.ts';
+import { parseSessionFile, parseHistoryFile, classifyUserLine, CORRECTION_RE } from './parser.ts';
 
 const TMP = path.join(os.tmpdir(), 'ccalyze-test-' + Date.now());
 
@@ -193,6 +193,88 @@ describe('parseSessionFile', () => {
 
     const result = await parseSessionFile(sessionFile);
     assert.deepEqual(result.messages[0].editedFiles, ['/a.ts']);
+  });
+});
+
+describe('classifyUserLine', () => {
+  const user = (content: unknown, extra: Record<string, unknown> = {}) => ({
+    type: 'user',
+    message: { role: 'user', content },
+    ...extra,
+  });
+
+  it('reads plain typed text as an instruction', () => {
+    assert.deepEqual(classifyUserLine(user('add a test for the parser')), ['instruction']);
+    assert.deepEqual(classifyUserLine(user([{ type: 'text', text: 'ship it' }])), ['instruction']);
+  });
+
+  it('reads an instruction opening with a push-back as a correction', () => {
+    assert.deepEqual(classifyUserLine(user("no, that's the wrong file")), ['correction']);
+    assert.deepEqual(classifyUserLine(user('It still doesn\'t work')), ['correction']);
+    assert.deepEqual(classifyUserLine(user('revert that change')), ['correction']);
+  });
+
+  it('does not read a push-back word mid-sentence as a correction', () => {
+    assert.deepEqual(classifyUserLine(user('there is no cache here, add one')), ['instruction']);
+    assert.deepEqual(classifyUserLine(user('notice the wrong index on line 4')), ['instruction']);
+  });
+
+  it('emits one event per tool_result block, marking errors', () => {
+    const line = user([
+      { type: 'tool_result', tool_use_id: 'a', content: 'ok' },
+      { type: 'tool_result', tool_use_id: 'b', content: 'boom', is_error: true },
+    ]);
+    assert.deepEqual(classifyUserLine(line), ['tool-ok', 'tool-error']);
+  });
+
+  it('reads the Esc marker as an interrupt, not an instruction', () => {
+    assert.deepEqual(classifyUserLine(user('[Request interrupted by user]')), ['interrupt']);
+    assert.deepEqual(
+      classifyUserLine(user([{ type: 'text', text: '[Request interrupted by user for tool use]' }])),
+      ['interrupt'],
+    );
+  });
+
+  it('drops what Claude Code injected rather than what the person typed', () => {
+    assert.deepEqual(classifyUserLine(user('<command-name>/model</command-name>')), []);
+    assert.deepEqual(classifyUserLine(user('<local-command-stdout>ok</local-command-stdout>')), []);
+    assert.deepEqual(classifyUserLine(user('<task-notification>done</task-notification>')), []);
+    assert.deepEqual(classifyUserLine(user('caveat', { isMeta: true })), []);
+    assert.deepEqual(classifyUserLine(user('summary', { isCompactSummary: true })), []);
+    assert.deepEqual(classifyUserLine(user('   ')), []);
+  });
+
+  it("keeps a subagent's tool results but not its prompt, which Claude wrote", () => {
+    assert.deepEqual(classifyUserLine(user('explore the repo', { isSidechain: true })), []);
+    assert.deepEqual(
+      classifyUserLine(user([{ type: 'tool_result', content: 'x', is_error: true }], { isSidechain: true })),
+      ['tool-error'],
+    );
+  });
+
+  it('anchors the correction pattern to the opening words', () => {
+    assert.ok(CORRECTION_RE.test('Wait, use the other branch'));
+    assert.ok(!CORRECTION_RE.test('nothing to do here'), 'a word starting with "no" is not "no"');
+  });
+});
+
+describe('parseSessionFile — interactions', () => {
+  it('records every classified user event with its timestamp', async () => {
+    const file = path.join(TMP, 'interactions.jsonl');
+    const lines = [
+      { type: 'user', timestamp: '2026-03-29T10:00:00Z', message: { content: 'fix the bug' } },
+      { type: 'user', timestamp: '2026-03-29T10:01:00Z', message: { content: [{ type: 'tool_result', is_error: true }] } },
+      { type: 'user', timestamp: '2026-03-29T10:02:00Z', message: { content: '[Request interrupted by user]' } },
+      { type: 'user', timestamp: '2026-03-29T10:03:00Z', message: { content: 'no, the other one' } },
+    ];
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n'));
+    const result = await parseSessionFile(file);
+    assert.deepEqual(result.interactions, [
+      { kind: 'instruction', timestamp: '2026-03-29T10:00:00Z' },
+      { kind: 'tool-error', timestamp: '2026-03-29T10:01:00Z' },
+      { kind: 'interrupt', timestamp: '2026-03-29T10:02:00Z' },
+      { kind: 'correction', timestamp: '2026-03-29T10:03:00Z' },
+    ]);
   });
 });
 

@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { runInNewContext } from 'node:vm';
 
 import { embedFindings, escapeHtml, renderHabitsHtml } from './report.ts';
 import type { HabitsReport, HabitsWindow } from './types.ts';
@@ -23,6 +24,14 @@ function window_(overrides: Partial<HabitsWindow> = {}): HabitsWindow {
     autoCompactionShare: 10,
     reworkShare: 25,
     longRunningSessions: 5,
+    effectiveness: {
+      instructions: 50,
+      turnsPerInstruction: 12.5,
+      perInstruction: 1.6,
+      correctionShare: 8,
+      interruptRate: 4,
+      toolErrorShare: 6.5,
+    },
     top3Share: 30,
     offHoursShare: 20,
     flagged: cohort,
@@ -52,7 +61,10 @@ function report_(overrides: Partial<HabitsReport> = {}): HabitsReport {
     prior: window_({ range: { from: '2026-08-04', to: '2026-08-10' }, cost: 60 }),
     delta: { cost: 33.3, prompts: 0, perPrompt: 33.3, sessions: 0 },
     headline: { finding: 'volume', why: 'Cost tracked volume.' },
-    scorecard: [{ measure: 'Consumption per prompt', prior: 0.2, current: 0.2, verdict: 'flat' }],
+    scorecard: [
+      { measure: 'Consumption per prompt', group: 'consumption', prior: 0.2, current: 0.2, verdict: 'flat', unit: 'units', lowerIsBetter: true, target: 'No fixed target.' },
+      { measure: 'Interrupts per 100 instructions', group: 'effectiveness', prior: 2, current: 4, verdict: 'worse', unit: 'per 100', lowerIsBetter: true, target: '0 is ideal.' },
+    ],
     levers: [],
     caveats: { costIsNotional: 'not money' },
     ...overrides,
@@ -109,7 +121,7 @@ describe('renderHabitsHtml', () => {
     const html = renderHabitsHtml(report_(), { today: TODAY });
     assert.match(html, /<h1>The extra usage is workload, not a habit<\/h1>/);
     assert.match(html, /Cost tracked volume\./);
-    assert.match(html, /<div class="cmdbox">ccalyze --habits 7d --html<\/div>/);
+    assert.match(html, /<div class="cmdbox">ccalyze --habits 7d<\/div>/);
     assert.match(html, /On <strong>2026-08-25<\/strong>/);
   });
 
@@ -171,6 +183,9 @@ describe('renderHabitsHtml', () => {
       'autoCompactionNeedsRecentTranscripts',
       'reworkIsNotAJudgement',
       'offHoursIsLocalClock',
+      'instructionsAreTyped',
+      'correctionIsHeuristic',
+      'toolErrorsIncludeDenials',
       'cleanCohort',
       'baselineUnmeasured',
     ]) {
@@ -178,9 +193,85 @@ describe('renderHabitsHtml', () => {
     }
   });
 
+  it('renders effectiveness rows in their own table, apart from the scorecard', () => {
+    const html = renderHabitsHtml(report_(), { today: TODAY });
+    assert.match(html, /<tbody id="effectiveness"><\/tbody>/);
+    assert.match(html, /How well the work flowed/);
+    assert.match(html, /r\.group === "effectiveness"/);
+    assert.match(html, /r\.group !== "effectiveness"/, 'an ungrouped row stays in the scorecard');
+  });
+
+  it('prints the effectiveness paragraph the findings imply', () => {
+    const html = renderHabitsHtml(report_(), { today: TODAY });
+    assert.match(html, /Across 50 typed instructions, each typed instruction set off 12\.5 agent turns/);
+  });
+
   it('is self-contained: nothing is fetched from another host', () => {
     const html = renderHabitsHtml(report_(), { today: TODAY });
     assert.doesNotMatch(html, /https?:\/\//);
     assert.doesNotMatch(html, /<link/);
+  });
+
+  describe('rendered scorecard rows', () => {
+    // Runs the page's own script against a stub DOM, so the assertions are about the
+    // HTML the page really builds, not about strings inside its source.
+    const renderRows = (scorecard: HabitsReport['scorecard']) => {
+      const html = renderHabitsHtml(report_({ scorecard }), { today: TODAY });
+      const scripts = [...html.matchAll(/<script>\n([\s\S]*?)\n<\/script>/g)].map((m) => m[1]);
+      const findings = html.match(/type="application\/json">\n([\s\S]*?)\n<\/script>/)![1];
+      const els = new Map<string, { innerHTML: string; textContent: string; append: () => void }>();
+      const el = (id: string) => {
+        if (!els.has(id)) els.set(id, { innerHTML: '', textContent: id === 'findings' ? findings : '', append() {} });
+        return els.get(id)!;
+      };
+      const document = { getElementById: el, querySelectorAll: () => [], createElement: () => ({ className: '', style: {}, append() {}, addEventListener() {}, setAttribute() {} }) };
+      runInNewContext(scripts[scripts.length - 1], { document, innerWidth: 1000, innerHeight: 800 });
+      return { scorecard: els.get('scorecard')!.innerHTML, effectiveness: els.get('effectiveness')!.innerHTML };
+    };
+    const base = {
+      group: 'consumption' as const,
+      prior: 5,
+      current: 0,
+      verdict: 'much better' as const,
+      goalMet: null,
+      unit: '%',
+      lowerIsBetter: true,
+      target: '0%',
+    };
+
+    it('shows GOOD, in the good colour, for a row that reaches its target', () => {
+      const out = renderRows([{ ...base, measure: 'Reaches', goalMet: true }]);
+      assert.match(out.scorecard, /<span class="chip good"[^>]*>good<\/span>/);
+      assert.doesNotMatch(out.scorecard, />much better</, 'the chip text is GOOD, not the trend');
+    });
+
+    it('keeps the trend verdict for a row that misses its target or has none', () => {
+      const out = renderRows([
+        { ...base, measure: 'Misses', current: 3, verdict: 'worse', goalMet: false },
+        { ...base, measure: 'Untargeted', goalMet: null },
+      ]);
+      assert.match(out.scorecard, /<span class="chip no"[^>]*>worse<\/span>/);
+      assert.match(out.scorecard, /<span class="chip ok"[^>]*>much better<\/span>/);
+      assert.doesNotMatch(out.scorecard, /chip good/);
+    });
+
+    it('puts a collapsible explanation under the measure, one paragraph per block, escaped', () => {
+      const out = renderRows([
+        { ...base, measure: 'Explained', about: 'First <b>paragraph</b>.\n\nSecond one.' },
+        { ...base, measure: 'Plain' },
+      ]);
+      assert.match(
+        out.scorecard,
+        /Explained\s*<details class="about"><summary>What this means<\/summary><div class="body"><p>First &lt;b&gt;paragraph&lt;\/b&gt;\.<\/p><p>Second one\.<\/p><\/div><\/details>/,
+      );
+      assert.equal(out.scorecard.match(/<details/g)?.length, 1, 'a row with no explanation gets none');
+    });
+
+    it('applies the same rendering to the effectiveness table', () => {
+      const out = renderRows([{ ...base, group: 'effectiveness', measure: 'Flow', goalMet: true, about: 'Why.' }]);
+      assert.match(out.effectiveness, /chip good/);
+      assert.match(out.effectiveness, /<details class="about">/);
+      assert.equal(out.scorecard, '');
+    });
   });
 });

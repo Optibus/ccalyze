@@ -13,17 +13,21 @@ import {
   pct,
   ratioDelta,
   resolveHabitWindows,
+  meetsGoal,
   scorecard,
   spanDays,
   summarizeWindow,
+  summarizeEffectiveness,
   parseWeekendDays,
   validateWindowPair,
 } from './habits.ts';
 import type {
+  InteractionCounts,
   Anomaly,
   CcalyzeOutput,
   DateRange,
   DaySummary,
+  HabitsWindow,
   ModelSummary,
   ProjectSummary,
   SessionFlag,
@@ -45,6 +49,7 @@ interface SessionSpec {
   compaction?: SessionSummary['compaction'];
   autoCompactions?: number;
   reworkEdits?: number;
+  interactions?: Partial<InteractionCounts>;
 }
 
 function session(spec: SessionSpec = {}): SessionSummary {
@@ -68,6 +73,15 @@ function session(spec: SessionSpec = {}): SessionSummary {
     compaction: spec.compaction ?? 'none',
     autoCompactions: spec.autoCompactions ?? 0,
     reworkEdits: spec.reworkEdits ?? 0,
+    interactions: {
+      instructions: 0,
+      corrections: 0,
+      interrupts: 0,
+      toolResults: 0,
+      toolErrors: 0,
+      requests: 0,
+      ...spec.interactions,
+    },
   };
 }
 
@@ -383,6 +397,41 @@ describe('summarizeWindow', () => {
   });
 });
 
+describe('summarizeEffectiveness', () => {
+  const counts = (over: Partial<InteractionCounts>) => session({ interactions: over });
+
+  it('divides by typed instructions, not by prompts', () => {
+    const e = summarizeEffectiveness(
+      [
+        counts({ instructions: 10, corrections: 1, interrupts: 1, requests: 120, toolResults: 50, toolErrors: 5 }),
+        counts({ instructions: 10, corrections: 1, interrupts: 0, requests: 80, toolResults: 50, toolErrors: 0 }),
+      ],
+      40,
+    );
+    assert.deepEqual(e, {
+      instructions: 20,
+      turnsPerInstruction: 10,
+      perInstruction: 2,
+      correctionShare: 10,
+      interruptRate: 5,
+      toolErrorShare: 5,
+    });
+  });
+
+  it('reads null rather than 0 when there is nothing to divide by', () => {
+    const e = summarizeEffectiveness([counts({ requests: 30 })], 10);
+    assert.equal(e.instructions, 0);
+    assert.equal(e.turnsPerInstruction, null);
+    assert.equal(e.correctionShare, null);
+    assert.equal(e.toolErrorShare, null);
+  });
+
+  it('lands on the window summary', () => {
+    const window = summarizeWindow(output({ sessions: [counts({ instructions: 4, requests: 40 })] }));
+    assert.equal(window.effectiveness.turnsPerInstruction, 10);
+  });
+});
+
 describe('parseWeekendDays', () => {
   it('reads three-letter day names, case and order insensitive', () => {
     assert.deepEqual(parseWeekendDays('fri,sat'), [5, 6]);
@@ -443,6 +492,39 @@ describe('scorecard', () => {
 
   const current = { from: '2026-08-10', to: '2026-08-16' };
   const prior = { from: '2026-08-03', to: '2026-08-09' };
+
+  it('groups the flow rows as effectiveness, the rest as consumption', () => {
+    const rows = scorecard(withPerPrompt(100, 100, current), withPerPrompt(100, 100, prior));
+    const flow = rows.filter((r) => r.group === 'effectiveness').map((r) => r.measure);
+    assert.deepEqual(flow, [
+      'Agent turns per typed instruction',
+      'Consumption per typed instruction',
+      'Instructions that correct the last turn (share)',
+      'Interrupts per 100 instructions',
+      'Tool calls that errored (share)',
+    ]);
+    assert.equal(rows[0].group, 'consumption');
+  });
+
+  it('gives agent turns per instruction no direction, while corrections still read worse', () => {
+    const win = (range: DateRange, over: Partial<InteractionCounts>) =>
+      summarizeWindow(output({ range, sessions: [session({ interactions: over })] }));
+    const rows = scorecard(
+      win(current, { instructions: 10, requests: 200, corrections: 3 }),
+      win(prior, { instructions: 10, requests: 100, corrections: 1 }),
+    );
+    const byName = (m: string) => rows.find((r) => r.measure === m)!;
+    const turns = byName('Agent turns per typed instruction');
+    assert.equal(turns.verdict, 'flat');
+    assert.equal(turns.lowerIsBetter, null);
+    // The reverse move must not read as a regression either.
+    const reversed = scorecard(
+      win(current, { instructions: 10, requests: 100, corrections: 1 }),
+      win(prior, { instructions: 10, requests: 200, corrections: 3 }),
+    );
+    assert.equal(reversed.find((r) => r.measure === 'Agent turns per typed instruction')!.verdict, 'flat');
+    assert.equal(byName('Instructions that correct the last turn (share)').verdict, 'worse');
+  });
 
   it('reads a sub-5% move as flat rather than booking it as a win', () => {
     const rows = scorecard(
@@ -865,5 +947,75 @@ describe('buildHabitsReport', () => {
         ),
       HabitsRefusal,
     );
+  });
+});
+
+describe('scorecard goals and explanations', () => {
+  const current = { from: '2026-08-10', to: '2026-08-16' };
+  const prior = { from: '2026-08-03', to: '2026-08-09' };
+  const rows = (cur: Partial<HabitsWindow>, pri: Partial<HabitsWindow> = {}) => {
+    const w = (range: DateRange, over: Partial<HabitsWindow>) => ({
+      ...summarizeWindow(output({ range, sessions: [session({ costUSD: 5, prompts: 10 })] })),
+      ...over,
+    });
+    return scorecard(w(current, cur), w(prior, pri));
+  };
+  const byName = (rs: ReturnType<typeof scorecard>, m: string) => rs.find((r) => r.measure === m)!;
+
+  it('meetsGoal covers at-most, at-least and under, inclusive where it says so', () => {
+    assert.equal(meetsGoal(0, { op: 'atMost', value: 0 }), true);
+    assert.equal(meetsGoal(0.1, { op: 'atMost', value: 0 }), false);
+    assert.equal(meetsGoal(90, { op: 'atLeast', value: 90 }), true);
+    assert.equal(meetsGoal(89.9, { op: 'atLeast', value: 90 }), false);
+    assert.equal(meetsGoal(40, { op: 'under', value: 40 }), false);
+    assert.equal(meetsGoal(39.9, { op: 'under', value: 40 }), true);
+  });
+
+  it('marks a row met only when current reaches the target, whatever the trend was', () => {
+    const rs = rows({ noCompactionShare: 0, cacheReadShare: 91 }, { noCompactionShare: 0, cacheReadShare: 99 });
+    // Cache fell 8% (worse), but 91% still reaches the 90% target.
+    assert.equal(byName(rs, 'Cache-read share of input tokens').verdict, 'worse');
+    assert.equal(byName(rs, 'Cache-read share of input tokens').goalMet, true);
+    assert.equal(byName(rs, 'Sessions with no /compact (share)').goalMet, true);
+  });
+
+  it('marks a row not met when it misses the target', () => {
+    const rs = rows({ autoCompactionShare: 2, cacheReadShare: 80 });
+    assert.equal(byName(rs, 'Sessions auto-compacted, hit the wall (share)').goalMet, false);
+    assert.equal(byName(rs, 'Cache-read share of input tokens').goalMet, false);
+  });
+
+  it('leaves goalMet null on rows whose target text says there is none', () => {
+    const rs = rows({});
+    for (const m of [
+      'Consumption per prompt',
+      'Top-three session concentration',
+      'Off-hours share (nights + weekends)',
+      'Sessions with repeated same-file edits (share)',
+      'Agent turns per typed instruction',
+      'Tool calls that errored (share)',
+    ]) {
+      assert.equal(byName(rs, m).goalMet, null, m);
+    }
+  });
+
+  it('judges the goal on a single window too, where there is no prior to compare', () => {
+    const only = scorecard(
+      { ...summarizeWindow(output({ range: current, sessions: [session({})] })), noCompactionShare: 0 },
+      null,
+    );
+    assert.equal(byName(only, 'Sessions with no /compact (share)').verdict, 'no-baseline');
+    assert.equal(byName(only, 'Sessions with no /compact (share)').goalMet, true);
+  });
+
+  it('gives every row an explanation', () => {
+    for (const r of rows({})) assert.ok(r.about && r.about.length > 40, `${r.measure} has an explanation`);
+  });
+
+  it('explains what large means and why the wall is too late', () => {
+    const rs = rows({});
+    assert.match(byName(rs, 'Sessions with no /compact (share)').about!, /30 or more prompts/);
+    assert.match(byName(rs, 'Sessions with no /compact (share)').about!, /200K/);
+    assert.match(byName(rs, 'Sessions auto-compacted, hit the wall (share)').about!, /too late/);
   });
 });

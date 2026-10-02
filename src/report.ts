@@ -79,7 +79,7 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
     --bg:#FAFBFF; --panel:#FFFFFF; --panel-2:#F1F5FF;
     --ink:#171717; --ink-2:#3F4763; --ink-3:#7A82A0;
     --rule:#DCE4FA; --rule-2:#EDF1FE; --brand:#2D1DA3;
-    --better:#2D1DA3; --worse:#FF2C95; --flat:#7A82A0; --watch:#FFA015;
+    --better:#2D1DA3; --worse:#FF2C95; --flat:#7A82A0; --watch:#FFA015; --good:#15803D;
     --font:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',sans-serif;
     --mono:ui-monospace,'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
     --s1:.3rem; --s2:.55rem; --s3:.9rem; --s4:1.25rem; --s5:1.8rem; --s6:2.4rem;
@@ -87,15 +87,15 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
   @media (prefers-color-scheme:dark){:root{
     --a:#5C86FF; --b:#F53F94; --bg:#271066; --panel:#311878; --panel-2:#3A2089;
     --ink:#FFF; --ink-2:#D3DAFF; --ink-3:#A79DE6; --rule:#4B2F9E; --rule-2:#402888;
-    --brand:#CDDBFF; --better:#8FB0FF; --worse:#F53F94; --flat:#A79DE6; --watch:#FFA941;}}
+    --brand:#CDDBFF; --better:#8FB0FF; --worse:#F53F94; --flat:#A79DE6; --watch:#FFA941; --good:#4ADE80;}}
   :root[data-theme="dark"]{
     --a:#5C86FF; --b:#F53F94; --bg:#271066; --panel:#311878; --panel-2:#3A2089;
     --ink:#FFF; --ink-2:#D3DAFF; --ink-3:#A79DE6; --rule:#4B2F9E; --rule-2:#402888;
-    --brand:#CDDBFF; --better:#8FB0FF; --worse:#F53F94; --flat:#A79DE6; --watch:#FFA941;}
+    --brand:#CDDBFF; --better:#8FB0FF; --worse:#F53F94; --flat:#A79DE6; --watch:#FFA941; --good:#4ADE80;}
   :root[data-theme="light"]{
     --a:#396DFF; --b:#FF2C95; --bg:#FAFBFF; --panel:#FFF; --panel-2:#F1F5FF;
     --ink:#171717; --ink-2:#3F4763; --ink-3:#7A82A0; --rule:#DCE4FA; --rule-2:#EDF1FE;
-    --brand:#2D1DA3; --better:#2D1DA3; --worse:#FF2C95; --flat:#7A82A0; --watch:#FFA015;}
+    --brand:#2D1DA3; --better:#2D1DA3; --worse:#FF2C95; --flat:#7A82A0; --watch:#FFA015; --good:#15803D;}
 
   *{box-sizing:border-box}
   body{background:var(--bg);color:var(--ink);font-family:var(--font);font-size:15.5px;line-height:1.52;margin:0;-webkit-font-smoothing:antialiased}
@@ -134,7 +134,7 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
   @media (max-width:940px){.rec{grid-template-columns:1.9rem minmax(0,1fr) 7.6rem}.rec .ev{grid-column:2;grid-row:2}}
   @media (max-width:620px){.rec{grid-template-columns:1.9rem minmax(0,1fr)}.rec .size{grid-column:2;text-align:left;align-items:flex-start}}
   .chip{display:inline-flex;align-items:center;gap:.35em;font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:.25em .6em;border:1.5px solid currentColor;border-radius:3px;white-space:nowrap}
-  .chip.ok{color:var(--better)}.chip.no{color:var(--worse)}.chip.mid{color:var(--watch)}.chip.nil{color:var(--flat)}
+  .chip.good{color:var(--good)}.chip.ok{color:var(--better)}.chip.no{color:var(--worse)}.chip.mid{color:var(--watch)}.chip.nil{color:var(--flat)}
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:4px;overflow:hidden}
   .stat{background:var(--panel);padding:var(--s3) var(--s4);display:flex;flex-direction:column;gap:var(--s1)}
   .stat .k{font-size:.68rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
@@ -162,12 +162,20 @@ export function renderHabitsHtml(report: HabitsReport, options: RenderOptions = 
   .tip{position:fixed;z-index:9;pointer-events:none;opacity:0;background:#2D1DA3;color:#fff;font-size:.74rem;padding:.45em .65em;border-radius:4px;transition:opacity .1s ease;max-width:270px;line-height:1.5;font-variant-numeric:tabular-nums}
   .tip.on{opacity:1}
   .tbl-scroll{overflow-x:auto;border:1px solid var(--rule);background:var(--panel);border-radius:4px}
-  table{border-collapse:collapse;width:100%;min-width:560px;font-size:.86rem}
+  table{border-collapse:collapse;width:100%;min-width:680px;font-size:.86rem}
   caption{text-align:left;font-size:.7rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);padding:var(--s3) var(--s4) var(--s2)}
   th,td{text-align:left;padding:.58rem var(--s4);border-top:1px solid var(--rule-2)}
   thead th{font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);border-top:none;border-bottom:1.5px solid var(--rule)}
   tbody th{font-weight:500;color:var(--ink)}
   td.num{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink-2);font-weight:500}
+  td.target{color:var(--ink-3);font-size:.82rem;max-width:26ch}
+  details.about{margin:.35rem 0 0 1.25rem;font-weight:400}
+  details.about summary{cursor:pointer;font-size:.74rem;color:var(--ink-3);list-style:revert}
+  details.about summary:hover{color:var(--ink)}
+  details.about .body{margin-top:.4rem;max-width:62ch}
+  details.about .body p{font-size:.82rem;line-height:1.5;color:var(--ink-2);max-width:none}
+  details.about .body p+p{margin-top:.5rem}
+  .dir{display:inline-block;color:var(--ink-3);font-size:.8em;cursor:help}
   tbody tr:hover{background:var(--panel-2)}
   .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:var(--s3) var(--s4)}
   .note{border-left:3px solid var(--rule);padding-left:var(--s3)}
@@ -234,9 +242,31 @@ ${prose.recommendations.map(recommendationHtml).join('\n')}
         <th scope="col">Measure</th>
         <th scope="col" class="num" data-f="prior.label"></th>
         <th scope="col" class="num" data-f="current.label"></th>
+        <th scope="col">What good looks like</th>
         <th scope="col">Reading</th>
       </tr></thead>
       <tbody id="scorecard"></tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="sec-head">
+    <p class="eyebrow">Effectiveness</p>
+    <h2>How well the work flowed</h2>
+  </div>
+  <p style="max-width:none;margin-bottom:var(--s3)">${escapeHtml(prose.effectiveness)}</p>
+  <div class="tbl-scroll">
+    <table>
+      <caption>Rates per typed instruction — not per prompt, which mostly counts tool results.</caption>
+      <thead><tr>
+        <th scope="col">Measure</th>
+        <th scope="col" class="num" data-f="prior.label"></th>
+        <th scope="col" class="num" data-f="current.label"></th>
+        <th scope="col">What good looks like</th>
+        <th scope="col">Reading</th>
+      </tr></thead>
+      <tbody id="effectiveness"></tbody>
     </table>
   </div>
 </section>
@@ -289,7 +319,7 @@ ${prose.recommendations.map(recommendationHtml).join('\n')}
   <span>Source · ccalyze over local Claude Code transcripts</span>
   <span id="foot-range"></span>
   <span id="foot-totals"></span>
-  <span>Generated by <code>ccalyze --habits --html</code></span>
+  <span>Generated by <code>ccalyze --habits</code></span>
 </footer>
 
 </div>
@@ -337,7 +367,7 @@ ${embedFindings(report)}
   else chips.push(["mid", "Conclusion · mixed"]);
   if (pri) {
     const improved = D.scorecard.filter(r => (r.verdict || "").endsWith("better")).length;
-    const worse = D.scorecard.filter(r => r.verdict === "worse").length;
+    const worse = D.scorecard.filter(r => r.verdict === "worse" && !r.goalMet).length;
     chips.push(worse > improved ? ["no", \`\${worse} measures worse\`]
                                 : ["nil", \`\${improved} measures improved, \${worse} worse\`]);
   }
@@ -371,11 +401,30 @@ ${embedFindings(report)}
   // Scorecard.
   const chipFor = v => v === "worse" ? "no" : v === "flat" ? "nil"
     : v === "no-baseline" ? "nil" : "ok";
-  document.getElementById("scorecard").innerHTML = D.scorecard.map(r =>
-    \`<tr><th scope="row">\${r.measure}</th>
-      <td class="num">\${r.prior === null ? "—" : r.prior}</td>
-      <td class="num">\${r.current === null ? "—" : r.current}</td>
-      <td><span class="chip \${chipFor(r.verdict)}">\${r.verdict}</span></td></tr>\`).join("");
+  const withUnit = (v, u) => v === null || v === undefined ? "—" : \`\${v}\${u ? \` \${u}\` : ""}\`;
+  // Two tables from one scorecard: a row without a group (a report written before
+  // groups existed) stays in the consumption table. Rows from an older report
+  // carry no unit/direction/target — fall back rather than print "undefined".
+  const esc = t => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const aboutHtml = text => !text ? "" :
+    \`<details class="about"><summary>What this means</summary><div class="body">\${
+      text.split("\\n\\n").map(p => \`<p>\${esc(p)}</p>\`).join("")}</div></details>\`;
+  const rowHtml = r => {
+    const dir = r.lowerIsBetter === null ? ["◆", "No direction — read as a level"]
+      : r.lowerIsBetter === false ? ["▲", "Higher is better"] : ["▼", "Lower is better"];
+    return \`<tr><th scope="row">
+        <span class="dir" title="\${dir[1]}" aria-label="\${dir[1]}">\${dir[0]}</span> \${r.measure}
+        \${aboutHtml(r.about)}
+      </th>
+      <td class="num">\${withUnit(r.prior, r.unit)}</td>
+      <td class="num">\${withUnit(r.current, r.unit)}</td>
+      <td class="target">\${r.target || "—"}</td>
+      <td><span class="chip \${r.goalMet ? "good" : chipFor(r.verdict)}" \${r.goalMet ? \`title="Reaches the target. Trend against the earlier window: \${r.verdict}"\` : ""}>\${r.goalMet ? "good" : r.verdict}</span></td></tr>\`;
+  };
+  document.getElementById("scorecard").innerHTML =
+    D.scorecard.filter(r => r.group !== "effectiveness").map(rowHtml).join("");
+  document.getElementById("effectiveness").innerHTML =
+    D.scorecard.filter(r => r.group === "effectiveness").map(rowHtml).join("");
 
   // Reading notes come from the JSON so they can never drift from the maths.
   // Any caveat key habits.ts adds later still renders — an unmapped key falls
@@ -388,6 +437,9 @@ ${embedFindings(report)}
     autoCompactionNeedsRecentTranscripts: "Auto-compaction needs a recent transcript",
     reworkIsNotAJudgement: "Repeated edits are not a verdict",
     offHoursIsLocalClock: "Off-hours reads this machine's clock",
+    instructionsAreTyped: "Effectiveness counts typed instructions, not prompts",
+    correctionIsHeuristic: "A correction is read off the opening words",
+    toolErrorsIncludeDenials: "Tool errors include denied permissions",
     cleanCohort: "The clean-cohort baseline",
     baselineUnmeasured: "The per-request baseline is unmeasured"
   };
@@ -397,9 +449,11 @@ ${embedFindings(report)}
 
   document.getElementById("foot-range").textContent =
     pri ? \`Windows · \${fmtRange(pri)} and \${fmtRange(cur)}\` : \`Window · \${fmtRange(cur)}\`;
-  document.getElementById("foot-totals").textContent =
-    \`\${num(cur.sessions + (pri ? pri.sessions : 0))} sessions · \` +
-    \`\${num(cur.prompts + (pri ? pri.prompts : 0))} prompts\`;
+  // Both windows combined — not the current-window count shown in the stat tiles above,
+  // which is B only. Said explicitly here so the two numbers are never mistaken for a mismatch.
+  document.getElementById("foot-totals").textContent = pri
+    ? \`Both windows combined · \${num(cur.sessions + pri.sessions)} sessions · \${num(cur.prompts + pri.prompts)} prompts\`
+    : \`\${num(cur.sessions)} sessions · \${num(cur.prompts)} prompts\`;
 
   /* ---------- charts ---------- */
   const tip = document.getElementById("tip");

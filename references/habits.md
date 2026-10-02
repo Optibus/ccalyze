@@ -85,8 +85,9 @@ stdout stays JSON, so one run produces both forms:
 $CC --habits 7d > ~/findings.json     # page path is printed on stderr
 ```
 
-`--no-html` skips the page. Use it only when nothing will be read by a human — a scripted
-collection, a size check, a pipeline. Not for a person asking a question.
+There is no way to skip the page — `--no-html` was removed and is refused by name. Never ask the
+person whether they want the HTML: the page is the report, and producing it is not optional. A
+script that only needs the JSON reads stdout and ignores the file.
 
 The page is generated, not composed: the conclusion paragraph, the three recommendations, the
 figure captions and the re-measure targets are all derived from the same JSON the run printed, by
@@ -144,7 +145,10 @@ not in the data.
 
 The scorecard's verdicts are mechanical, and about a number rather than a person: a sub-5%
 relative move reads `flat`, not `better`, because a scorecard that books noise as a win stops
-being worth reading. `levers` sizes what is left — the model-mix ceiling assumes every
+being worth reading. A row with a numeric target (0% auto-compacted, 90%+ cache-read, and so
+on) also carries `goalMet`; the page then reads **GOOD**, in green, whatever the trend was, and
+every row carries an `about` paragraph that the page shows in a collapsible under the measure.
+`levers` sizes what is left — the model-mix ceiling assumes every
 expensive-model prompt was avoidable, which it is not, so quote `realistic` (a third) as the band
 worth aiming at.
 
@@ -161,6 +165,43 @@ read the row's direction across the two windows, not its level in one:
   compacted did not go unmanaged, it ran out of room before anyone acted.
 - **Repeated same-file edit share** — cannot tell deliberate iteration from thrashing on its own;
   the level in one window means little, a rising share across two means more.
+
+### Effectiveness rows — how well the work went, not what it cost
+
+The scorecard carries a second group (`group: "effectiveness"`), rendered as its own table on the
+page. Consumption rows say whether the work got cheaper; these say whether it went **better** —
+whether instructions landed the first time. Every rate divides by instructions the person actually
+**typed** (`current.effectiveness.instructions`), never by `prompts`: most `prompts` are tool
+results Claude Code files under the user role, so a per-prompt rate moves with how many tools ran.
+
+| Row | What it counts | Better when |
+|---|---|---|
+| Agent turns per typed instruction | deduplicated API requests ÷ typed instructions | higher |
+| Consumption per typed instruction | window consumption ÷ typed instructions | lower |
+| Instructions that correct the last turn | typed instructions opening with a push-back ("no", "that's wrong", "revert", "still failing") | lower |
+| Interrupts per 100 instructions | `[Request interrupted by user]` markers — Esc mid-turn | lower |
+| Tool calls that errored | `tool_result` blocks marked `is_error` ÷ all tool results | lower |
+
+How to read them together:
+
+- **Turns up, corrections and interrupts flat or down** — instructions carry more work and still
+  land. The best direction there is.
+- **Turns up, corrections or interrupts up too** — Claude runs longer and gets stopped or redirected
+  more. That is a loop, not leverage. The fix is a sharper first message, or a plan step before the
+  work starts.
+- **Corrections up alone** — instructions arrive before the task is pinned down. Say what "done"
+  looks like in the first message.
+- **Tool errors up** — often a changed environment (a moved path, a new permission prompt, a broken
+  test command), not a habit. Look at which tool fails before advising anything.
+
+The correction test is an English, opening-words heuristic — it misses a polite redirect and
+catches the odd "no rush, but…". The tool-error count includes permissions the person denied and
+tests that fail on purpose. So, like rework and off-hours: **read the direction across two windows,
+never the level in one**, and quote the `instructionsAreTyped`, `correctionIsHeuristic` and
+`toolErrorsIncludeDenials` caveats when you cite a row.
+
+These are still the usage compared against itself. They are not output metrics — they count how
+the conversation went, not what shipped — so "compare against commits or PRs" stays off the table.
 
 **A flag is not a mark against anyone.** Several have perfectly good reasons — "13 hours because
 I was tracing a data-corruption bug across three services" explains it completely. These are
@@ -212,3 +253,6 @@ both hold and the limit still binds, that is finding C arriving the long way rou
 - **Waiting until fully blocked.** Two weeks of data and an early conversation beats an emergency one.
 - **Judging rework or off-hours share from a single window.** Neither is a verdict on its own —
   read the direction across two windows.
+- **Reading more agent turns per instruction as good on its own.** It is only leverage if the
+  correction and interrupt rows held. Rising together, it is a loop.
+- **Asking whether they want the HTML page.** Every run writes it; publish it.

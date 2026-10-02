@@ -50,6 +50,7 @@ describe('types', () => {
         compaction: 'none',
         autoCompactions: 0,
         reworkEdits: 0,
+        interactions: { instructions: 0, corrections: 0, interrupts: 0, toolResults: 0, toolErrors: 0, requests: 0 },
       }],
       anomalies: [{
         type: 'cost_spike',
