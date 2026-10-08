@@ -296,6 +296,17 @@ describe('detectAnomalies — unknown model pricing', () => {
     assert.doesNotMatch(unknown!.detail, /claude-opus-5/, 'known models must not be listed');
   });
 
+  it('flags a new generation instead of absorbing it into the previous one', () => {
+    const found = detectAnomalies(makeOutput({
+      byModel: {
+        'claude-opus-5-7': { costUSD: 5, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, sessions: 1 },
+      },
+    }));
+    const unknown = found.find((a) => a.type === 'unknown_model_pricing');
+    assert.ok(unknown, 'a -5-7 suffix must not inherit claude-opus-5 silently');
+    assert.match(unknown!.detail, /claude-opus-5-7/);
+  });
+
   it('says nothing when every model is priced', () => {
     const found = detectAnomalies(makeOutput({
       byModel: {
