@@ -51,7 +51,7 @@ describe('cost', () => {
 
   it('prices the 5.5 / 5.1 generation at published rates', () => {
     assert.deepEqual(MODEL_PRICING['claude-opus-5-5'], { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 });
-    assert.deepEqual(MODEL_PRICING['claude-sonnet-5-5'], { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 });
+    assert.deepEqual(MODEL_PRICING['claude-sonnet-5-5'], { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 });
     assert.deepEqual(MODEL_PRICING['claude-fable-5-1'], { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 });
   });
 

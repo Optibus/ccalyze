@@ -23,7 +23,7 @@ import type { ModelPricing, RawUsage } from './types.ts';
  * once analysed data runs more than PRICING_STALE_AFTER_DAYS past it, because
  * a price change on a model already in the table is invisible otherwise.
  */
-export const PRICES_VERIFIED = '2026-10-06';
+export const PRICES_VERIFIED = '2026-10-08';
 export const PRICING_STALE_AFTER_DAYS = 90;
 
 function rates(input: number, output: number, cacheReadMultiplier = 0.1): ModelPricing {
@@ -38,6 +38,7 @@ export const CACHE_READ_MULTIPLIER: Record<string, number> = {
   'claude-fable-5-1': 0.025,
   'claude-mythos-5-1': 0.025,
   'claude-opus-5-5': 0.05,
+  'claude-sonnet-5-5': 0.05,
 };
 
 export const MODEL_PRICING: Record<string, ModelPricing> = {
@@ -54,7 +55,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   'claude-opus-4-6': rates(5, 25),
   'claude-opus-4-5': rates(5, 25),
   // Sonnet tier.
-  'claude-sonnet-5-5': rates(2, 10),
+  'claude-sonnet-5-5': rates(2, 10, CACHE_READ_MULTIPLIER['claude-sonnet-5-5']),
   // Sonnet 5 launched at an introductory $2/$10; Anthropic later made that the
   // standard price and cancelled the planned rise to $3/$15.
   'claude-sonnet-5': rates(2, 10),
