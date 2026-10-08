@@ -203,6 +203,12 @@ export interface CcalyzeOutput {
   sessions: SessionSummary[];
   anomalies: Anomaly[];
   tips: string[];
+  /**
+   * Which price table produced every cost in this report. A machine can refresh
+   * its own prices (`--update-prices`), so two reports from two PCs are only
+   * comparable if each says what it used.
+   */
+  pricing: { source: 'built-in' | 'local'; verifiedOn: string };
   /** Populated only with --deep: per-session behavioral hooks for insights fusion. */
   deep?: DeepData;
 }

@@ -15,6 +15,14 @@ import {
   resolveHabitWindows,
 } from './habits.ts';
 import { renderHabitsHtml } from './report.ts';
+import { useLocalPricing } from './cost.ts';
+import {
+  checkPrices,
+  fetchPricingPage,
+  loadLocalPricing,
+  localPricingPath,
+  updatePrices,
+} from './local-pricing.ts';
 import type { CcalyzeOutput, DateRange } from './types.ts';
 import { VERSION } from './version.ts';
 
@@ -52,6 +60,10 @@ export interface ParsedArgs {
   version: boolean;
   /** Print usage and exit 0. */
   help: boolean;
+  /** Fetch the published prices and save them for this machine. Explicit, never automatic. */
+  updatePrices: boolean;
+  /** Compare the built-in table with the published page; exit 1 on drift (a dev/CI check). */
+  checkPrices: boolean;
   /** Compare the last N complete days against the N before them. */
   habits: boolean;
   /** Window LENGTH in days for --habits. The dates are never settable. */
@@ -133,6 +145,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     deep: false,
     version: false,
     help: false,
+    updatePrices: false,
+    checkPrices: false,
     habits: false,
     singleWindow: false,
     redactProjects: false,
@@ -152,6 +166,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (name === '--deep') flags.deep = true;
     else if (name === '--version' || name === '-v') flags.version = true;
     else if (name === '--help' || name === '-h') flags.help = true;
+    else if (name === '--update-prices') flags.updatePrices = true;
+    else if (name === '--check-prices') flags.checkPrices = true;
     else if (name === '--habits') flags.habits = true;
     else if (name === '--single-window') flags.singleWindow = true;
     else if (name === '--redact-projects') flags.redactProjects = true;
@@ -458,6 +474,8 @@ Range (default 7d):
 Options:
   --deep                    include the per-prompt index
   --json                    emit JSON (the default, and the only, output)
+  --update-prices           fetch the published prices and save them for this machine
+  --check-prices            compare built-in prices with the published page (exit 1 on drift)
   --version, -v             print version
   --help, -h                this text
 
@@ -491,6 +509,31 @@ async function main() {
   }
 
   const claudeDir = resolve(homedir(), '.claude');
+
+  if (args.updatePrices) {
+    process.exitCode = await updatePrices({
+      fetchPage: fetchPricingPage,
+      path: localPricingPath(claudeDir),
+      today: new Date().toISOString().slice(0, 10),
+      out: console.log,
+      err: console.error,
+    });
+    return;
+  }
+
+  if (args.checkPrices) {
+    process.exitCode = await checkPrices({ fetchPage: fetchPricingPage, out: console.log, err: console.error });
+    return;
+  }
+
+  // A bad price file degrades to the built-in table with a warning: a report
+  // must never be lost to a file this tool wrote for convenience.
+  const pricePath = localPricingPath(claudeDir);
+  try {
+    useLocalPricing(loadLocalPricing(pricePath));
+  } catch (e) {
+    console.error(`ccalyze: ignoring ${pricePath}: ${(e as Error).message}. Using built-in prices.`);
+  }
 
   if (args.habits) {
     await runHabits(claudeDir, args);

@@ -94,6 +94,11 @@ Parse the JSON output and render as markdown:
    that ran inside subagents — those are read in a clean context and thrown away, so they never
    get re-sent on later turns. A high share is a *good* sign, not a cost warning.
 3. **Anomaly alerts**: If anomalies exist, show them prominently with severity indicators
+   - If `unknown_model_pricing` or `stale_model_pricing` appears, say so plainly (those costs are
+     a guess or may be out of date) and **offer** to run `$CC --update-prices`. Never run it
+     unasked. It fetches Anthropic's published prices and changes them on this machine only.
+     `pricing.source` (`built-in` or `local`) and `pricing.verifiedOn` in every report say which
+     prices it used.
 4. **Cost by Model table**: Model | Cost | % of total
 5. **Top Sessions table**: Name | Project | Cost | Cache % | Duration | Prompts | Flags.
    Prefer `session.name` (derived from the user's opening prompt) over the raw id — fall back to

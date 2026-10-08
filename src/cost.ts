@@ -67,10 +67,46 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
 
 const DEFAULT_PRICING = MODEL_PRICING['claude-opus-5'];
 
-/** The table entry for a model id, or undefined when nothing matches. */
-function lookupPricing(modelId: string): ModelPricing | undefined {
+/**
+ * Prices a machine refreshed for itself (`ccalyze --update-prices`), layered
+ * over MODEL_PRICING. Module state rather than a parameter because pricing is
+ * read deep inside cost math that has no config to thread it through; callers
+ * set it once at startup, and tests must reset it with `useLocalPricing(undefined)`.
+ */
+export interface LocalPricing {
+  verifiedOn: string;
+  models: Record<string, ModelPricing>;
+}
+
+export type PricingSource = { source: 'built-in' | 'local'; verifiedOn: string };
+
+let overlay: LocalPricing | undefined;
+
+/**
+ * Adopt a local price file — but only if it is strictly fresher than the
+ * built-in table. A plugin update ships a newer built-in table, and an old
+ * local file must not keep overriding it with prices that predate it.
+ */
+export function useLocalPricing(local: LocalPricing | undefined): void {
+  overlay = local && local.verifiedOn > PRICES_VERIFIED ? local : undefined;
+}
+
+export function pricingSource(): PricingSource {
+  return overlay
+    ? { source: 'local', verifiedOn: overlay.verifiedOn }
+    : { source: 'built-in', verifiedOn: PRICES_VERIFIED };
+}
+
+/** What `local` would resolve to today: built-in plus the overlay if it is fresher. */
+export function effectiveModels(local: LocalPricing | undefined): Record<string, ModelPricing> {
+  return local && local.verifiedOn > PRICES_VERIFIED
+    ? { ...MODEL_PRICING, ...local.models }
+    : { ...MODEL_PRICING };
+}
+
+function lookupIn(table: Record<string, ModelPricing>, modelId: string): ModelPricing | undefined {
   // Direct match
-  if (MODEL_PRICING[modelId]) return MODEL_PRICING[modelId];
+  if (table[modelId]) return table[modelId];
 
   // Strip only a date suffix and/or the 1M-context marker:
   // "claude-haiku-4-5-20251001" -> "claude-haiku-4-5", "claude-opus-5[1m]" -> "claude-opus-5".
@@ -78,9 +114,14 @@ function lookupPricing(modelId: string): ModelPricing | undefined {
   // prefix loop silently priced each new generation as the previous one and
   // kept the unknown_model_pricing anomaly from ever firing.
   const base = modelId.replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
-  if (MODEL_PRICING[base]) return MODEL_PRICING[base];
+  if (table[base]) return table[base];
 
   return undefined;
+}
+
+/** The table entry for a model id, or undefined when nothing matches. Local prices win over built-in. */
+function lookupPricing(modelId: string): ModelPricing | undefined {
+  return (overlay && lookupIn(overlay.models, modelId)) ?? lookupIn(MODEL_PRICING, modelId);
 }
 
 /**

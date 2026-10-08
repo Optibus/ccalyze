@@ -9,6 +9,8 @@ import { detectAnomalies } from "./anomalies.js";
 import { generateTips } from "./tips.js";
 import { buildHabitsReport, HabitsRefusal, parseWeekendDays, resolveHabitWindows, } from "./habits.js";
 import { renderHabitsHtml } from "./report.js";
+import { useLocalPricing } from "./cost.js";
+import { checkPrices, fetchPricingPage, loadLocalPricing, localPricingPath, updatePrices, } from "./local-pricing.js";
 import { VERSION } from "./version.js";
 /** Default window length for --habits, in days. */
 export const HABITS_DEFAULT_LENGTH = 7;
@@ -78,6 +80,8 @@ export function parseArgs(argv) {
         deep: false,
         version: false,
         help: false,
+        updatePrices: false,
+        checkPrices: false,
         habits: false,
         singleWindow: false,
         redactProjects: false,
@@ -100,6 +104,10 @@ export function parseArgs(argv) {
             flags.version = true;
         else if (name === '--help' || name === '-h')
             flags.help = true;
+        else if (name === '--update-prices')
+            flags.updatePrices = true;
+        else if (name === '--check-prices')
+            flags.checkPrices = true;
         else if (name === '--habits')
             flags.habits = true;
         else if (name === '--single-window')
@@ -379,6 +387,8 @@ Range (default 7d):
 Options:
   --deep                    include the per-prompt index
   --json                    emit JSON (the default, and the only, output)
+  --update-prices           fetch the published prices and save them for this machine
+  --check-prices            compare built-in prices with the published page (exit 1 on drift)
   --version, -v             print version
   --help, -h                this text
 
@@ -408,6 +418,29 @@ async function main() {
         return;
     }
     const claudeDir = resolve(homedir(), '.claude');
+    if (args.updatePrices) {
+        process.exitCode = await updatePrices({
+            fetchPage: fetchPricingPage,
+            path: localPricingPath(claudeDir),
+            today: new Date().toISOString().slice(0, 10),
+            out: console.log,
+            err: console.error,
+        });
+        return;
+    }
+    if (args.checkPrices) {
+        process.exitCode = await checkPrices({ fetchPage: fetchPricingPage, out: console.log, err: console.error });
+        return;
+    }
+    // A bad price file degrades to the built-in table with a warning: a report
+    // must never be lost to a file this tool wrote for convenience.
+    const pricePath = localPricingPath(claudeDir);
+    try {
+        useLocalPricing(loadLocalPricing(pricePath));
+    }
+    catch (e) {
+        console.error(`ccalyze: ignoring ${pricePath}: ${e.message}. Using built-in prices.`);
+    }
     if (args.habits) {
         await runHabits(claudeDir, args);
         return;

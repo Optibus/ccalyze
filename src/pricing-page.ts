@@ -105,9 +105,10 @@ export function parsePricingPage(markdown: string): ParsedPricingPage {
       continue;
     }
     if (TIER_QUALIFIER.test(name)) {
-      // Priced by prompt length, which ccalyze has no per-request way to pick
-      // (it has one flat rate per model). Returning either tier would silently
-      // misprice: Claude Code prompts routinely exceed 100k tokens.
+      // Priced by prompt length. Costs are computed per request, but
+      // ModelPricing holds one flat rate per model, so there is nowhere to put
+      // two tiers. Returning either would silently misprice: Claude Code
+      // prompts routinely exceed 100k tokens.
       tieredIds.add(id);
       continue;
     }

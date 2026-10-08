@@ -60,20 +60,43 @@ export const MODEL_PRICING = {
     'claude-haiku-4-5': rates(1, 5),
 };
 const DEFAULT_PRICING = MODEL_PRICING['claude-opus-5'];
-/** The table entry for a model id, or undefined when nothing matches. */
-function lookupPricing(modelId) {
+let overlay;
+/**
+ * Adopt a local price file — but only if it is strictly fresher than the
+ * built-in table. A plugin update ships a newer built-in table, and an old
+ * local file must not keep overriding it with prices that predate it.
+ */
+export function useLocalPricing(local) {
+    overlay = local && local.verifiedOn > PRICES_VERIFIED ? local : undefined;
+}
+export function pricingSource() {
+    return overlay
+        ? { source: 'local', verifiedOn: overlay.verifiedOn }
+        : { source: 'built-in', verifiedOn: PRICES_VERIFIED };
+}
+/** What `local` would resolve to today: built-in plus the overlay if it is fresher. */
+export function effectiveModels(local) {
+    return local && local.verifiedOn > PRICES_VERIFIED
+        ? { ...MODEL_PRICING, ...local.models }
+        : { ...MODEL_PRICING };
+}
+function lookupIn(table, modelId) {
     // Direct match
-    if (MODEL_PRICING[modelId])
-        return MODEL_PRICING[modelId];
+    if (table[modelId])
+        return table[modelId];
     // Strip only a date suffix and/or the 1M-context marker:
     // "claude-haiku-4-5-20251001" -> "claude-haiku-4-5", "claude-opus-5[1m]" -> "claude-opus-5".
     // No bare prefix match: "claude-opus-5-5" startsWith "claude-opus-5", so a
     // prefix loop silently priced each new generation as the previous one and
     // kept the unknown_model_pricing anomaly from ever firing.
     const base = modelId.replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
-    if (MODEL_PRICING[base])
-        return MODEL_PRICING[base];
+    if (table[base])
+        return table[base];
     return undefined;
+}
+/** The table entry for a model id, or undefined when nothing matches. Local prices win over built-in. */
+function lookupPricing(modelId) {
+    return (overlay && lookupIn(overlay.models, modelId)) ?? lookupIn(MODEL_PRICING, modelId);
 }
 /**
  * True when this model has published pricing (directly, or after stripping a date

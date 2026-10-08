@@ -1,6 +1,6 @@
 {
   "name": "ccalyze",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Claude Code usage analyzer \u2014 costs, anomalies, and optimization tips",
   "type": "module",
   "bin": {
@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:tests": "tsc -p tsconfig.test.json",
     "verify": "npm run typecheck && npm run typecheck:tests && npm test",
+    "check-prices": "node --experimental-strip-types src/cli.ts --check-prices",
     "bundle-skill": "node scripts/bundle-skill.mjs"
   },
   "keywords": [

@@ -52,6 +52,7 @@ function makeOutput(overrides: Partial<CcalyzeOutput> = {}): CcalyzeOutput {
     sessions: [],
     anomalies: [],
     tips: [],
+    pricing: { source: 'built-in', verifiedOn: PRICES_VERIFIED },
     ...overrides,
   };
 }
@@ -294,7 +295,8 @@ describe('detectAnomalies — unknown model pricing', () => {
     const unknown = found.find((a) => a.type === 'unknown_model_pricing');
     assert.ok(unknown, 'expected an unknown_model_pricing anomaly');
     assert.match(unknown!.detail, /claude-opus-9/);
-    assert.doesNotMatch(unknown!.detail, /claude-opus-5/, 'known models must not be listed');
+    assert.doesNotMatch(unknown!.detail, /claude-opus-5\b[^-]/, 'known models must not be listed');
+    assert.match(unknown!.detail, /ccalyze --update-prices/);
   });
 
   it('flags a new generation instead of absorbing it into the previous one', () => {
@@ -335,7 +337,24 @@ describe('detectAnomalies — stale model pricing', () => {
     assert.equal(found.length, 1);
     assert.equal(found[0].severity, 'low');
     assert.match(found[0].detail, new RegExp(PRICES_VERIFIED));
-    assert.match(found[0].detail, /src\/cost\.ts/);
+    assert.match(found[0].detail, /Run `ccalyze --update-prices` to refresh them on this machine\.$/);
+  });
+
+  it('measures staleness from output.pricing.verifiedOn, not the built-in date', () => {
+    // A machine that refreshed its prices is judged by the refreshed date, and
+    // the rule stays a pure function of its input.
+    const to = daysAfterVerified(PRICING_STALE_AFTER_DAYS + 1);
+    const fresh = detectAnomalies(makeOutput({
+      range: { from: to, to },
+      pricing: { source: 'local', verifiedOn: to },
+    })).filter((a) => a.type === 'stale_model_pricing');
+    assert.equal(fresh.length, 0);
+    const old = detectAnomalies(makeOutput({
+      range: { from: to, to },
+      pricing: { source: 'local', verifiedOn: '2020-01-01' },
+    })).filter((a) => a.type === 'stale_model_pricing');
+    assert.equal(old.length, 1);
+    assert.match(old[0].detail, /2020-01-01/);
   });
 
   it('stays quiet on the last day of the window', () => {

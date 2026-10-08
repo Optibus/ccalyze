@@ -1,11 +1,16 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
+  analyzeRange,
   defaultHabitsHtmlPath,
   HABITS_DEFAULT_LENGTH,
   parseArgs,
   resolveDateRange,
 } from './cli.ts';
+import { PRICES_VERIFIED, useLocalPricing } from './cost.ts';
 
 describe('parseArgs', () => {
   it('defaults to 7d', () => {
@@ -315,5 +320,36 @@ describe('parseArgs — version flag', () => {
 
   it('does not treat --version as a range', () => {
     assert.equal(parseArgs(['--version']).rangeArg, '7d');
+  });
+});
+
+describe('price-maintenance flags', () => {
+  it('parses --update-prices and --check-prices', () => {
+    assert.equal(parseArgs(['--update-prices']).updatePrices, true);
+    assert.equal(parseArgs(['--check-prices']).checkPrices, true);
+    const none = parseArgs([]);
+    assert.equal(none.updatePrices, false);
+    assert.equal(none.checkPrices, false);
+  });
+});
+
+describe('analyzeRange pricing metadata', () => {
+  it('reports which prices produced the report', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ccalyze-cli-'));
+    try {
+      const range = { from: '2026-01-01', to: '2026-01-01' };
+      assert.deepEqual((await analyzeRange(dir, range, false)).pricing, {
+        source: 'built-in',
+        verifiedOn: PRICES_VERIFIED,
+      });
+      useLocalPricing({ verifiedOn: '2999-01-01', models: {} });
+      assert.deepEqual((await analyzeRange(dir, range, false)).pricing, {
+        source: 'local',
+        verifiedOn: '2999-01-01',
+      });
+    } finally {
+      useLocalPricing(undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -1,4 +1,4 @@
-import { isPricingKnown, PRICES_VERIFIED, PRICING_STALE_AFTER_DAYS } from "./cost.js";
+import { isPricingKnown, PRICING_STALE_AFTER_DAYS } from "./cost.js";
 /**
  * Main-thread model changes in one session before churn is worth mentioning.
  *
@@ -143,20 +143,22 @@ export function detectAnomalies(output) {
             type: 'unknown_model_pricing',
             severity: 'medium',
             detail: `No published pricing for ${unpriced.join(', ')} — cost estimated at Opus rates. ` +
-                `Update MODEL_PRICING in src/cost.ts; until then these figures are a guess.`,
+                `Run \`ccalyze --update-prices\` to fetch current prices (or add the model to ` +
+                `MODEL_PRICING in src/cost.ts); until then these figures are a guess.`,
         });
     }
     // Stale pricing — unknown_model_pricing catches a new model, but not a price
     // change on a listed one (Sonnet 5 read 1.5x high that way). Measured against
     // the analysed range rather than the clock, so the output stays reproducible.
-    const pricingAgeDays = (Date.parse(output.range.to) - Date.parse(PRICES_VERIFIED)) / 86_400_000;
+    // Dated by the table that actually priced this report (output.pricing), which
+    // also keeps this function pure over its input.
+    const pricingAgeDays = (Date.parse(output.range.to) - Date.parse(output.pricing.verifiedOn)) / 86_400_000;
     if (pricingAgeDays > PRICING_STALE_AFTER_DAYS) {
         anomalies.push({
             type: 'stale_model_pricing',
             severity: 'low',
-            detail: `Model prices were last checked on ${PRICES_VERIFIED}, ${Math.floor(pricingAgeDays)} days ` +
-                `before the end of this range. Re-check them against the published pricing page and ` +
-                `update MODEL_PRICING and PRICES_VERIFIED in src/cost.ts.`,
+            detail: `Model prices were last checked on ${output.pricing.verifiedOn}, ${Math.floor(pricingAgeDays)} days ` +
+                `before the end of this range. Run \`ccalyze --update-prices\` to refresh them on this machine.`,
         });
     }
     // Cost spike detection

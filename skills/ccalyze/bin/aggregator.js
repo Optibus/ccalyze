@@ -1,4 +1,4 @@
-import { computeCost, resolveModelPricing } from "./cost.js";
+import { computeCost, pricingSource, resolveModelPricing } from "./cost.js";
 /**
  * Tally a session's classified user events. A correction is also an
  * instruction — it is one the person typed — so it counts in both.
@@ -359,6 +359,7 @@ export function aggregate(sessions, history, range, deep = false) {
         sessions: sessionSummaries,
         anomalies: [],
         tips: [],
+        pricing: pricingSource(),
     };
     if (deep) {
         output.deep = buildDeepData(sessions, sessionSummaries, history);
