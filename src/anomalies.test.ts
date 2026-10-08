@@ -6,6 +6,7 @@ import {
   LOW_CACHE_MIN_COST_USD,
   COLD_START_MIN_EVENTS,
 } from './anomalies.ts';
+import { PRICES_VERIFIED, PRICING_STALE_AFTER_DAYS } from './cost.ts';
 import type { CcalyzeOutput, SessionSummary } from './types.ts';
 
 /**
@@ -51,6 +52,7 @@ function makeOutput(overrides: Partial<CcalyzeOutput> = {}): CcalyzeOutput {
     sessions: [],
     anomalies: [],
     tips: [],
+    pricing: { source: 'built-in', verifiedOn: PRICES_VERIFIED },
     ...overrides,
   };
 }
@@ -293,7 +295,19 @@ describe('detectAnomalies — unknown model pricing', () => {
     const unknown = found.find((a) => a.type === 'unknown_model_pricing');
     assert.ok(unknown, 'expected an unknown_model_pricing anomaly');
     assert.match(unknown!.detail, /claude-opus-9/);
-    assert.doesNotMatch(unknown!.detail, /claude-opus-5/, 'known models must not be listed');
+    assert.doesNotMatch(unknown!.detail, /claude-opus-5\b[^-]/, 'known models must not be listed');
+    assert.match(unknown!.detail, /ccalyze --update-prices/);
+  });
+
+  it('flags a new generation instead of absorbing it into the previous one', () => {
+    const found = detectAnomalies(makeOutput({
+      byModel: {
+        'claude-opus-5-7': { costUSD: 5, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, sessions: 1 },
+      },
+    }));
+    const unknown = found.find((a) => a.type === 'unknown_model_pricing');
+    assert.ok(unknown, 'a -5-7 suffix must not inherit claude-opus-5 silently');
+    assert.match(unknown!.detail, /claude-opus-5-7/);
   });
 
   it('says nothing when every model is priced', () => {
@@ -304,5 +318,50 @@ describe('detectAnomalies — unknown model pricing', () => {
       },
     }));
     assert.equal(found.filter((a) => a.type === 'unknown_model_pricing').length, 0);
+  });
+});
+
+describe('detectAnomalies — stale model pricing', () => {
+  /** PRICES_VERIFIED shifted by `days`, as YYYY-MM-DD. */
+  function daysAfterVerified(days: number): string {
+    const d = new Date(`${PRICES_VERIFIED}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  const stale = (to: string) =>
+    detectAnomalies(makeOutput({ range: { from: to, to } }))
+      .filter((a) => a.type === 'stale_model_pricing');
+
+  it('warns once the range ends past the staleness window', () => {
+    const found = stale(daysAfterVerified(PRICING_STALE_AFTER_DAYS + 1));
+    assert.equal(found.length, 1);
+    assert.equal(found[0].severity, 'low');
+    assert.match(found[0].detail, new RegExp(PRICES_VERIFIED));
+    assert.match(found[0].detail, /Run `ccalyze --update-prices` to refresh them on this machine\.$/);
+  });
+
+  it('measures staleness from output.pricing.verifiedOn, not the built-in date', () => {
+    // A machine that refreshed its prices is judged by the refreshed date, and
+    // the rule stays a pure function of its input.
+    const to = daysAfterVerified(PRICING_STALE_AFTER_DAYS + 1);
+    const fresh = detectAnomalies(makeOutput({
+      range: { from: to, to },
+      pricing: { source: 'local', verifiedOn: to },
+    })).filter((a) => a.type === 'stale_model_pricing');
+    assert.equal(fresh.length, 0);
+    const old = detectAnomalies(makeOutput({
+      range: { from: to, to },
+      pricing: { source: 'local', verifiedOn: '2020-01-01' },
+    })).filter((a) => a.type === 'stale_model_pricing');
+    assert.equal(old.length, 1);
+    assert.match(old[0].detail, /2020-01-01/);
+  });
+
+  it('stays quiet on the last day of the window', () => {
+    assert.equal(stale(daysAfterVerified(PRICING_STALE_AFTER_DAYS)).length, 0);
+  });
+
+  it('stays quiet for data older than the price check', () => {
+    assert.equal(stale(daysAfterVerified(-30)).length, 0);
   });
 });

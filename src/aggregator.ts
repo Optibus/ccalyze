@@ -17,7 +17,7 @@ import type {
 } from './types.ts';
 import type { ParsedMessage } from './types.ts';
 import type { SessionParseResult } from './parser.ts';
-import { computeCost, resolveModelPricing } from './cost.ts';
+import { computeCost, pricingSource, resolveModelPricing } from './cost.ts';
 
 /**
  * Tally a session's classified user events. A correction is also an
@@ -442,6 +442,7 @@ export function aggregate(
     sessions: sessionSummaries,
     anomalies: [],
     tips: [],
+    pricing: pricingSource(),
   };
 
   if (deep) {

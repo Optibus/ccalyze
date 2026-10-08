@@ -58,6 +58,7 @@ describe('types', () => {
         detail: 'Today cost is 3.2x your 7-day average',
       }],
       tips: ['Use /compact every 15-20 prompts.'],
+      pricing: { source: 'built-in', verifiedOn: '2026-10-08' },
     };
 
     assert.equal(output.summary.totalSessions, 11);

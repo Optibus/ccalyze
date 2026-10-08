@@ -13,6 +13,7 @@ function makeOutput(anomalies: Anomaly[], sessions: CcalyzeOutput['sessions'] = 
     sessions,
     anomalies,
     tips: [],
+    pricing: { source: 'built-in', verifiedOn: '2026-10-08' },
   };
 }
 

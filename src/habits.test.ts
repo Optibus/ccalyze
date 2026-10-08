@@ -130,6 +130,7 @@ function output(spec: OutputSpec = {}): CcalyzeOutput {
     sessions,
     anomalies: spec.anomalies ?? [],
     tips: [],
+    pricing: { source: 'built-in', verifiedOn: '2026-10-08' },
   };
 }
 

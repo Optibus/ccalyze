@@ -5,7 +5,8 @@
  * Treat the resulting figures as relative weight / quota burn.
  *
  * Cache rates follow the published multipliers rather than being typed by hand:
- * a cache read is 0.1x the input rate, a 5-minute cache write is 1.25x. A test
+ * a cache read is 0.1x the input rate (except the published overrides in
+ * CACHE_READ_MULTIPLIER), a 5-minute cache write is 1.25x. A test
  * pins that relationship, so a new model can't be added with invented cache
  * numbers.
  *
@@ -13,50 +14,93 @@
  * rates, which silently overstated Sonnet by 5x until 2026-07-27 — the
  * `unknown_model_pricing` anomaly now surfaces that fallback instead of hiding it.
  */
-function rates(input, output) {
-    return { input, output, cacheRead: input * 0.1, cacheWrite: input * 1.25 };
+/**
+ * The day this table was last checked against the published pricing page
+ * (platform.claude.com/docs/en/about-claude/pricing). Bump it whenever you
+ * re-check, even if nothing changed: the `stale_model_pricing` anomaly fires
+ * once analysed data runs more than PRICING_STALE_AFTER_DAYS past it, because
+ * a price change on a model already in the table is invisible otherwise.
+ */
+export const PRICES_VERIFIED = '2026-10-08';
+export const PRICING_STALE_AFTER_DAYS = 90;
+function rates(input, output, cacheReadMultiplier = 0.1) {
+    return { input, output, cacheRead: input * cacheReadMultiplier, cacheWrite: input * 1.25 };
 }
+/**
+ * Published cache-read multipliers that differ from the standard 0.1x
+ * (platform.claude.com/docs/en/about-claude/pricing, footnotes 1-2).
+ */
+export const CACHE_READ_MULTIPLIER = {
+    'claude-fable-5-1': 0.025,
+    'claude-mythos-5-1': 0.025,
+    'claude-opus-5-5': 0.05,
+    'claude-sonnet-5-5': 0.05,
+};
 export const MODEL_PRICING = {
     // Fable / Mythos tier
+    'claude-fable-5-1': rates(10, 50, CACHE_READ_MULTIPLIER['claude-fable-5-1']),
+    'claude-mythos-5-1': rates(10, 50, CACHE_READ_MULTIPLIER['claude-mythos-5-1']),
     'claude-fable-5': rates(10, 50),
     'claude-mythos-5': rates(10, 50),
     // Opus tier
+    'claude-opus-5-5': rates(4, 20, CACHE_READ_MULTIPLIER['claude-opus-5-5']),
     'claude-opus-5': rates(5, 25),
     'claude-opus-4-8': rates(5, 25),
     'claude-opus-4-7': rates(5, 25),
     'claude-opus-4-6': rates(5, 25),
     'claude-opus-4-5': rates(5, 25),
     // Sonnet tier.
-    // Sonnet 5 carries introductory pricing of $2/$10 through 2026-08-31; this
-    // table uses the standard rate, so Sonnet 5 usage inside that window reads
-    // high. Deliberate — date-windowed pricing isn't worth the complexity for a
-    // relative-weight signal.
-    'claude-sonnet-5': rates(3, 15),
+    'claude-sonnet-5-5': rates(2, 10, CACHE_READ_MULTIPLIER['claude-sonnet-5-5']),
+    // Sonnet 5 launched at an introductory $2/$10; Anthropic later made that the
+    // standard price and cancelled the planned rise to $3/$15.
+    'claude-sonnet-5': rates(2, 10),
     'claude-sonnet-4-6': rates(3, 15),
     'claude-sonnet-4-5': rates(3, 15),
     // Haiku tier
     'claude-haiku-4-5': rates(1, 5),
 };
 const DEFAULT_PRICING = MODEL_PRICING['claude-opus-5'];
-/** The table entry for a model id, or undefined when nothing matches. */
-function lookupPricing(modelId) {
+let overlay;
+/**
+ * Adopt a local price file — but only if it is strictly fresher than the
+ * built-in table. A plugin update ships a newer built-in table, and an old
+ * local file must not keep overriding it with prices that predate it.
+ */
+export function useLocalPricing(local) {
+    overlay = local && local.verifiedOn > PRICES_VERIFIED ? local : undefined;
+}
+export function pricingSource() {
+    return overlay
+        ? { source: 'local', verifiedOn: overlay.verifiedOn }
+        : { source: 'built-in', verifiedOn: PRICES_VERIFIED };
+}
+/** What `local` would resolve to today: built-in plus the overlay if it is fresher. */
+export function effectiveModels(local) {
+    return local && local.verifiedOn > PRICES_VERIFIED
+        ? { ...MODEL_PRICING, ...local.models }
+        : { ...MODEL_PRICING };
+}
+function lookupIn(table, modelId) {
     // Direct match
-    if (MODEL_PRICING[modelId])
-        return MODEL_PRICING[modelId];
-    // Try stripping date suffix: "claude-opus-4-5-20251101" -> "claude-opus-4-5"
-    const withoutDate = modelId.replace(/-\d{8}$/, '');
-    if (MODEL_PRICING[withoutDate])
-        return MODEL_PRICING[withoutDate];
-    // Try matching family: "claude-haiku-4-5-20251001" -> look for "claude-haiku-4-5"
-    for (const key of Object.keys(MODEL_PRICING)) {
-        if (modelId.startsWith(key))
-            return MODEL_PRICING[key];
-    }
+    if (table[modelId])
+        return table[modelId];
+    // Strip only a date suffix and/or the 1M-context marker:
+    // "claude-haiku-4-5-20251001" -> "claude-haiku-4-5", "claude-opus-5[1m]" -> "claude-opus-5".
+    // No bare prefix match: "claude-opus-5-5" startsWith "claude-opus-5", so a
+    // prefix loop silently priced each new generation as the previous one and
+    // kept the unknown_model_pricing anomaly from ever firing.
+    const base = modelId.replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
+    if (table[base])
+        return table[base];
     return undefined;
 }
+/** The table entry for a model id, or undefined when nothing matches. Local prices win over built-in. */
+function lookupPricing(modelId) {
+    return (overlay && lookupIn(overlay.models, modelId)) ?? lookupIn(MODEL_PRICING, modelId);
+}
 /**
- * True when this model has published pricing (directly, or via a dated/family
- * prefix). False means `computeCost` is estimating at Opus rates — surfaced as
+ * True when this model has published pricing (directly, or after stripping a date
+ * suffix or `[1m]` marker). False means `computeCost` is estimating at Opus rates — surfaced as
  * the `unknown_model_pricing` anomaly so the estimate is never mistaken for exact.
  */
 export function isPricingKnown(modelId) {
