@@ -83,7 +83,9 @@ export type AnomalyType =
   /** A session repeatedly rebuilt its cache from cold after the TTL expired. */
   | 'cache_cold_start'
   /** A model in this range has no published pricing — its cost is an estimate. */
-  | 'unknown_model_pricing';
+  | 'unknown_model_pricing'
+  /** The pricing table was last checked long before this range ended. */
+  | 'stale_model_pricing';
 
 export type Severity = 'high' | 'medium' | 'low';
 

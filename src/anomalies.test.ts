@@ -6,6 +6,7 @@ import {
   LOW_CACHE_MIN_COST_USD,
   COLD_START_MIN_EVENTS,
 } from './anomalies.ts';
+import { PRICES_VERIFIED, PRICING_STALE_AFTER_DAYS } from './cost.ts';
 import type { CcalyzeOutput, SessionSummary } from './types.ts';
 
 /**
@@ -315,5 +316,33 @@ describe('detectAnomalies — unknown model pricing', () => {
       },
     }));
     assert.equal(found.filter((a) => a.type === 'unknown_model_pricing').length, 0);
+  });
+});
+
+describe('detectAnomalies — stale model pricing', () => {
+  /** PRICES_VERIFIED shifted by `days`, as YYYY-MM-DD. */
+  function daysAfterVerified(days: number): string {
+    const d = new Date(`${PRICES_VERIFIED}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  const stale = (to: string) =>
+    detectAnomalies(makeOutput({ range: { from: to, to } }))
+      .filter((a) => a.type === 'stale_model_pricing');
+
+  it('warns once the range ends past the staleness window', () => {
+    const found = stale(daysAfterVerified(PRICING_STALE_AFTER_DAYS + 1));
+    assert.equal(found.length, 1);
+    assert.equal(found[0].severity, 'low');
+    assert.match(found[0].detail, new RegExp(PRICES_VERIFIED));
+    assert.match(found[0].detail, /src\/cost\.ts/);
+  });
+
+  it('stays quiet on the last day of the window', () => {
+    assert.equal(stale(daysAfterVerified(PRICING_STALE_AFTER_DAYS)).length, 0);
+  });
+
+  it('stays quiet for data older than the price check', () => {
+    assert.equal(stale(daysAfterVerified(-30)).length, 0);
   });
 });

@@ -14,6 +14,15 @@
  * rates, which silently overstated Sonnet by 5x until 2026-07-27 — the
  * `unknown_model_pricing` anomaly now surfaces that fallback instead of hiding it.
  */
+/**
+ * The day this table was last checked against the published pricing page
+ * (platform.claude.com/docs/en/about-claude/pricing). Bump it whenever you
+ * re-check, even if nothing changed: the `stale_model_pricing` anomaly fires
+ * once analysed data runs more than PRICING_STALE_AFTER_DAYS past it, because
+ * a price change on a model already in the table is invisible otherwise.
+ */
+export const PRICES_VERIFIED = '2026-10-06';
+export const PRICING_STALE_AFTER_DAYS = 90;
 function rates(input, output, cacheReadMultiplier = 0.1) {
     return { input, output, cacheRead: input * cacheReadMultiplier, cacheWrite: input * 1.25 };
 }
