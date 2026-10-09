@@ -152,8 +152,15 @@ every row carries an `about` paragraph that the page shows in a collapsible unde
 expensive-model prompt was avoidable, which it is not, so quote `realistic` (a third) as the band
 worth aiming at.
 
-Four rows beyond consumption/cache/cold-start/model-mix, each with its own honesty caveat below —
+Six rows beyond consumption/cache/cold-start/model-mix, each with its own honesty caveat below —
 read the row's direction across the two windows, not its level in one:
+
+- **Long-session premium** — cost per agent turn in sessions of 3 h or more, divided by the same
+  in sessions under 1 h. Shows what session length itself costs, with volume divided out. Stays
+  empty (`null`) unless each side has 30 turns, so a quiet window does not print a ratio.
+- **Old context re-read per output token** — cache-read tokens per token written. Not the same as
+  the cache-read share: that says whether the cache is hitting, this says how heavy the cached
+  conversation has become. Low-signal alone; read the direction across the two windows.
 
 - **Off-hours share** (nights + weekends) — a burnout signal, not a cost one. Reads the local
   clock of the machine that ran ccalyze, so it is only honest when that is also the machine/time
@@ -181,6 +188,7 @@ results Claude Code files under the user role, so a per-prompt rate moves with h
 | Instructions that correct the last turn | typed instructions opening with a push-back ("no", "that's wrong", "revert", "still failing") | lower |
 | Interrupts per 100 instructions | `[Request interrupted by user]` markers — Esc mid-turn | lower |
 | Tool calls that errored | `tool_result` blocks marked `is_error` ÷ all tool results | lower |
+| Usage-limit stops | synthetic assistant lines flagged `error: "rate_limit"` — work halted until the limit reset | lower (0 is the target) |
 
 How to read them together:
 
