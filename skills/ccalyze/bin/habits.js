@@ -250,6 +250,9 @@ export function summarizeEffectiveness(sessions, cost) {
  * Every turn resends the whole conversation, so the same step gets dearer as a
  * session ages. Reading it as a ratio of two rates keeps volume out of it: a window
  * with more long sessions does not move it, only a steeper climb does.
+ *
+ * Duration is the in-window span, so a session cut by a window edge is classed by
+ * the part inside the window, the same part its cost and turns come from.
  */
 export function longSessionPremium(sessions) {
     const rate = (rows) => {

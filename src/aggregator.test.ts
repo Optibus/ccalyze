@@ -8,6 +8,7 @@ import {
   DEEP_MAX_PROMPT_DISPLAYS,
   DEEP_MAX_PROMPT_DISPLAY_CHARS,
   SESSION_NAME_MAX_CHARS,
+  countInteractions,
 } from './aggregator.ts';
 import type { EnrichedSession } from './aggregator.ts';
 import type { SessionParseResult } from './parser.ts';
@@ -634,5 +635,21 @@ describe('buildDeepData — main-thread churn', () => {
       message({ requestId: 'b', model: 'claude-haiku-4-5', timestamp: '2026-03-29T10:01:00Z' }),
     ] }], [], []);
     assert.equal(deep.sessions[0].mainModelSwitchCount, 1);
+  });
+});
+
+describe('countInteractions — usage-limit stops', () => {
+  it('counts each rate-limit event, and only those', () => {
+    const session = {
+      messages: [],
+      interactions: [
+        { kind: 'rate-limit', timestamp: '2026-03-29T10:00:00Z' },
+        { kind: 'instruction', timestamp: '2026-03-29T10:01:00Z' },
+        { kind: 'rate-limit', timestamp: '2026-03-29T10:02:00Z' },
+      ],
+    } as unknown as EnrichedSession;
+    const counts = countInteractions(session);
+    assert.equal(counts.rateLimits, 2);
+    assert.equal(counts.instructions, 1);
   });
 });

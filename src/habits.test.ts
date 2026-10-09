@@ -466,6 +466,11 @@ describe('longSessionPremium', () => {
     assert.equal(longSessionPremium([sized(20, 5, 100)]), null);
   });
 
+  it('accepts exactly the minimum number of turns on each side', () => {
+    assert.equal(longSessionPremium([sized(240, 30, 30), sized(20, 15, 30)]), 2);
+    assert.equal(longSessionPremium([sized(240, 30, 29), sized(20, 15, 30)]), null);
+  });
+
   it('puts the exact boundaries on the long side and the short side', () => {
     // 180 min is long; 60 min is not short.
     assert.equal(longSessionPremium([sized(180, 20, 100), sized(59, 10, 100)]), 2);

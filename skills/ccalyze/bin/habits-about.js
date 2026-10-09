@@ -8,7 +8,7 @@
  */
 export const ABOUT = {
     longPremium: [
-        'What one agent step costs in a session that ran 3 hours or more, divided by what it costs in a session under 1 hour. A 2 means the same step is twice as dear once the session is long.',
+        'What one agent step costs in a session that ran 3 hours or more, divided by what it costs in a session under 1 hour. Time is wall clock, so idle time counts. A 2 means the same step is twice as dear once the session is long.',
         'Every step resends the whole conversation, so the longer it runs, the more each step carries. This is the number that shows how much a long session costs you, in the same units as everything else here. It needs 30 steps on each side, otherwise it stays empty.',
         'What helps: /compact at a natural break, or a fresh session with a short summary, before the conversation gets heavy.',
     ].join('\n\n'),
