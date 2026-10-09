@@ -400,6 +400,19 @@ export interface HabitsWindow {
   reworkShare: number;
   longRunningSessions: number;
   /**
+   * Cost per agent turn in sessions over {@link LONG_SESSION_MINUTES} divided by the
+   * same in sessions under {@link SHORT_SESSION_MINUTES}. 1 means a long session costs
+   * no more per step than a short one; every step above that is the conversation being
+   * resent. Null when either side has too few turns to stand as a baseline.
+   */
+  longSessionPremium: number | null;
+  /**
+   * Cache-read tokens per output token: how much old context is dragged through each
+   * token Claude writes. Separate from `cacheReadShare`, which says whether the cache
+   * is hitting; this says how heavy the thing being cached has become. Null with no output.
+   */
+  rereadPerOutput: number | null;
+  /**
    * How well the work flowed, as opposed to what it cost. Null rates mean the
    * window had no typed instruction (or no tool call) to divide by.
    */
@@ -453,6 +466,8 @@ export interface HabitsEffectiveness {
   interruptRate: number | null;
   /** Share of tool calls that came back as an error, 0-100. Lower is better. */
   toolErrorShare: number | null;
+  /** Times a usage limit stopped the work. A count, not a rate: one stop is lost hours. */
+  usageLimitStops: number;
 }
 
 export interface HabitsScorecardRow {
