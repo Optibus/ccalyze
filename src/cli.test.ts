@@ -370,10 +370,31 @@ describe('writeHabitsPage', () => {
     }
   });
 
+  it('writes both lines to stderr and nothing to stdout by default', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ccalyze-page-'));
+    const realError = console.error;
+    const realLog = console.log;
+    const err: string[] = [];
+    const out: string[] = [];
+    console.error = (line: string) => err.push(line);
+    console.log = (line: string) => out.push(line);
+    try {
+      const path = join(dir, 'habits.html');
+      writeHabitsPage(path, '<p>page</p>');
+      assert.deepEqual(err, [`report: ${path}`, PUBLISH_INSTRUCTION]);
+      assert.deepEqual(out, [], 'stdout stays JSON-only, so nothing here');
+    } finally {
+      console.error = realError;
+      console.log = realLog;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('tells the reader not to rewrite the page or use another layout', () => {
     assert.match(PUBLISH_INSTRUCTION, /publish this file, unchanged/);
     assert.match(PUBLISH_INSTRUCTION, /Do not rewrite it/);
     assert.match(PUBLISH_INSTRUCTION, /another skill/);
+    assert.match(PUBLISH_INSTRUCTION, /Skip only if the person asked/);
   });
 
   it('warns instead of throwing when the path is unwritable, and gives no publish instruction', () => {

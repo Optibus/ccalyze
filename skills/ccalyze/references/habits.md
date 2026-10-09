@@ -103,7 +103,7 @@ before the conclusion.
 **This page beats any other artifact format.** If another skill or instruction asks for its own
 artifact layout (a status view, an executive summary), publish the habits page anyway and put the
 extra framing in chat. The run also prints `NEXT, required: publish this file, unchanged…` next to
-the path, so the rule reaches an agent that never opened this file.
+the path.
 
 Then publish it, every time:
 

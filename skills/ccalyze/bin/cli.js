@@ -386,7 +386,8 @@ export function writeHabitsPage(path, html, log = console.error) {
  */
 export const PUBLISH_INSTRUCTION = 'NEXT, required: publish this file, unchanged, as the Artifact. ' +
     'Do not rewrite it or rebuild it from the JSON, and do not swap in another skill\'s artifact layout. ' +
-    'Reply with the link and one line of context.';
+    'Reply with the link and one line of context. ' +
+    'Skip only if the person asked for the raw data or asked not to publish.';
 /**
  * Usage text.
  *
