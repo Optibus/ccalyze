@@ -85,6 +85,7 @@ export const ABOUT = {
     ].join('\n\n'),
     limitStops: [
         'How many times Claude Code stopped because a usage limit ran out (the five-hour window or the weekly cap).',
+        'Each message that bounced off the limit counts once, so one lockout where you retried four times reads as four. Read the direction, not the exact figure.',
         'This is where quota loss turns into lost time: the work halts until the limit resets. Any number above zero is worth tracing back to the sessions that burned the window, using the rows above.',
     ].join('\n\n'),
 };
