@@ -31,6 +31,7 @@ export function countInteractions(session: EnrichedSession): InteractionCounts {
     toolResults: 0,
     toolErrors: 0,
     requests: session.messages.length,
+    rateLimits: 0,
   };
   for (const { kind } of session.interactions ?? []) {
     if (kind === 'instruction' || kind === 'correction') counts.instructions++;
@@ -38,6 +39,7 @@ export function countInteractions(session: EnrichedSession): InteractionCounts {
     if (kind === 'interrupt') counts.interrupts++;
     if (kind === 'tool-ok' || kind === 'tool-error') counts.toolResults++;
     if (kind === 'tool-error') counts.toolErrors++;
+    if (kind === 'rate-limit') counts.rateLimits++;
   }
   return counts;
 }

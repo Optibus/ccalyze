@@ -7,9 +7,16 @@
  * text says so and points at how to check, rather than guessing at a cause.
  */
 export const ABOUT = {
-  perPrompt: [
-    'Total consumption divided by the number of prompts Claude Code sent. Most of those prompts are tool results going back to the model, not things you typed, so this is "cost per agent step".',
-    'Lower means each step is cheaper. Because volume divides out, it shows efficiency rather than how much you worked.',
+  longPremium: [
+    'What one agent step costs in a session that ran 3 hours or more, divided by what it costs in a session under 1 hour. Time is wall clock, so idle time counts. A 2 means the same step is twice as dear once the session is long.',
+    'Every step resends the whole conversation, so the longer it runs, the more each step carries. This is the number that shows how much a long session costs you, in the same units as everything else here. It needs 30 steps on each side, otherwise it stays empty.',
+    'What helps: /compact at a natural break, or a fresh session with a short summary, before the conversation gets heavy.',
+  ].join('\n\n'),
+
+  reread: [
+    'How many tokens were read back from the cache for every token Claude wrote. Claude writes a little and re-reads a lot, because each step resends the conversation.',
+    'It is not the same as the cache-read share below. That one says whether the cache is hitting. This one says how heavy the cached conversation has become. A heavy session can hit the cache every time and still burn a lot.',
+    'Lower means lighter context for the same output. There is no fixed target: read the direction across the two windows.',
   ].join('\n\n'),
 
   coldShare: [
@@ -17,15 +24,6 @@ export const ABOUT = {
     'ccalyze counts a cold start when a gap over 60 minutes is followed by a rebuild of at least 20,000 tokens.',
     'Your picture is close. The common cause is: you send a prompt, the agent stops (it finished, or asked a question), you leave for a meeting or the end of the day, and you come back after an hour. The cost is for the idle gap, not for the agent being stuck. An agent that keeps working never goes cold, because it keeps sending requests.',
     'What helps: give tasks a clear "done" definition and enough permission so the agent can run to the end instead of stopping to ask. Plan your day so a big session is finished or handed off before a long break. When you return after a long gap, start a fresh session with a short summary instead of resuming a huge one.',
-  ].join('\n\n'),
-
-  coldSessions: [
-    'How many sessions had at least one cold start (see the row above). It is a count of sessions, not of rebuilds, so one session you returned to three times counts once.',
-  ].join('\n\n'),
-
-  over24h: [
-    'The share of consumption that came from sessions whose first and last message are more than 24 hours apart. This is wall-clock time, so a session left open overnight counts even if nothing ran.',
-    'Long sessions resend a large conversation on every turn, which is why this is worth watching. High is fine when the work really spans days.',
   ].join('\n\n'),
 
   top3: [
@@ -100,5 +98,11 @@ export const ABOUT = {
   toolErrors: [
     'The share of tool calls that returned an error. Denied permissions and tests that fail on purpose count too, so it never reaches exactly 0.',
     'A rising share can mean the agent is guessing at commands or paths. Read the direction, not the level.',
+  ].join('\n\n'),
+
+  limitStops: [
+    'How many times Claude Code stopped because a usage limit ran out (the five-hour window or the weekly cap).',
+    'Each message that bounced off the limit counts once, so one lockout where you retried four times reads as four. Read the direction, not the exact figure.',
+    'This is where quota loss turns into lost time: the work halts until the limit resets. Any number above zero is worth tracing back to the sessions that burned the window, using the rows above.',
   ].join('\n\n'),
 } as const;

@@ -41,13 +41,15 @@ function window_(overrides: Partial<HabitsWindow> = {}): HabitsWindow {
     autoCompactionShare: 10,
     reworkShare: 25,
     longRunningSessions: 5,
+    longSessionPremium: 2.4,
+    rereadPerOutput: 150,
     effectiveness: {
       instructions: 50,
       turnsPerInstruction: 12.5,
       perInstruction: 1.6,
       correctionShare: 8,
       interruptRate: 4,
-      toolErrorShare: 6.5,
+      toolErrorShare: 6.5, usageLimitStops: 0,
     },
     top3Share: 30,
     offHoursShare: 20,
@@ -168,7 +170,7 @@ describe('buildProse — effectiveness', () => {
     const empty = window_({
       effectiveness: {
         instructions: 0, turnsPerInstruction: null, perInstruction: null,
-        correctionShare: null, interruptRate: null, toolErrorShare: null,
+        correctionShare: null, interruptRate: null, toolErrorShare: null, usageLimitStops: 0,
       },
     });
     assert.match(buildProse(report_({ current: empty })).effectiveness, /No typed instruction was found/);
@@ -178,7 +180,7 @@ describe('buildProse — effectiveness', () => {
 describe('buildProse — correction target', () => {
   const eff = (correctionShare: number | null) => ({
     instructions: 50, turnsPerInstruction: 10, perInstruction: 1,
-    correctionShare, interruptRate: 1, toolErrorShare: 1,
+    correctionShare, interruptRate: 1, toolErrorShare: 1, usageLimitStops: 0,
   });
 
   it('aims a risen correction share back at the prior level', () => {

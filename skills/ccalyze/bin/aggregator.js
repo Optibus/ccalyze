@@ -11,6 +11,7 @@ export function countInteractions(session) {
         toolResults: 0,
         toolErrors: 0,
         requests: session.messages.length,
+        rateLimits: 0,
     };
     for (const { kind } of session.interactions ?? []) {
         if (kind === 'instruction' || kind === 'correction')
@@ -23,6 +24,8 @@ export function countInteractions(session) {
             counts.toolResults++;
         if (kind === 'tool-error')
             counts.toolErrors++;
+        if (kind === 'rate-limit')
+            counts.rateLimits++;
     }
     return counts;
 }

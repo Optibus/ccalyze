@@ -10,6 +10,7 @@ import {
   HabitsRefusal,
   headline,
   levers,
+  longSessionPremium,
   pct,
   ratioDelta,
   resolveHabitWindows,
@@ -27,6 +28,7 @@ import type {
   CcalyzeOutput,
   DateRange,
   DaySummary,
+  HabitsScorecardRow,
   HabitsWindow,
   ModelSummary,
   ProjectSummary,
@@ -80,6 +82,7 @@ function session(spec: SessionSpec = {}): SessionSummary {
       toolResults: 0,
       toolErrors: 0,
       requests: 0,
+      rateLimits: 0,
       ...spec.interactions,
     },
   };
@@ -416,7 +419,13 @@ describe('summarizeEffectiveness', () => {
       correctionShare: 10,
       interruptRate: 5,
       toolErrorShare: 5,
+      usageLimitStops: 0,
     });
+  });
+
+  it('sums usage-limit stops across sessions, as a count', () => {
+    const e = summarizeEffectiveness([counts({ rateLimits: 2 }), counts({ rateLimits: 1 })], 1);
+    assert.equal(e.usageLimitStops, 3);
   });
 
   it('reads null rather than 0 when there is nothing to divide by', () => {
@@ -430,6 +439,92 @@ describe('summarizeEffectiveness', () => {
   it('lands on the window summary', () => {
     const window = summarizeWindow(output({ sessions: [counts({ instructions: 4, requests: 40 })] }));
     assert.equal(window.effectiveness.turnsPerInstruction, 10);
+  });
+});
+
+describe('longSessionPremium', () => {
+  const sized = (durationMinutes: number, costUSD: number, requests: number) =>
+    session({ durationMinutes, costUSD, interactions: { requests } });
+
+  it('divides the cost per turn of long sessions by that of short ones', () => {
+    // long: $30 over 100 turns = 0.30; short: $5 over 100 turns = 0.05.
+    assert.equal(longSessionPremium([sized(240, 30, 100), sized(20, 5, 100)]), 6);
+  });
+
+  it('is 1 when length costs nothing extra per step', () => {
+    assert.equal(longSessionPremium([sized(200, 10, 100), sized(30, 10, 100)]), 1);
+  });
+
+  it('leaves out sessions between the two bands', () => {
+    // A 90-minute session is neither long nor short; its cost must not tilt either side.
+    assert.equal(longSessionPremium([sized(240, 20, 100), sized(20, 10, 100), sized(90, 500, 100)]), 2);
+  });
+
+  it('reads null when either side lacks the turns to stand as a baseline', () => {
+    assert.equal(longSessionPremium([sized(240, 30, 100), sized(20, 5, 10)]), null);
+    assert.equal(longSessionPremium([sized(240, 30, 10), sized(20, 5, 100)]), null);
+    assert.equal(longSessionPremium([sized(20, 5, 100)]), null);
+  });
+
+  it('accepts exactly the minimum number of turns on each side', () => {
+    assert.equal(longSessionPremium([sized(240, 30, 30), sized(20, 15, 30)]), 2);
+    assert.equal(longSessionPremium([sized(240, 30, 29), sized(20, 15, 30)]), null);
+  });
+
+  it('puts the exact boundaries on the long side and the short side', () => {
+    // 180 min is long; 60 min is not short.
+    assert.equal(longSessionPremium([sized(180, 20, 100), sized(59, 10, 100)]), 2);
+    assert.equal(longSessionPremium([sized(179, 20, 100), sized(59, 10, 100)]), null);
+    assert.equal(longSessionPremium([sized(180, 20, 100), sized(60, 10, 100)]), null);
+  });
+
+  it('lands on the window summary', () => {
+    const w = summarizeWindow(output({ sessions: [sized(240, 30, 100), sized(20, 5, 100)] }));
+    assert.equal(w.longSessionPremium, 6);
+  });
+});
+
+describe('rereadPerOutput', () => {
+  const withTokens = (cacheRead: number, out: number) => {
+    const o = output({});
+    o.summary.totalCacheReadTokens = cacheRead;
+    o.summary.totalOutputTokens = out;
+    return summarizeWindow(o);
+  };
+
+  it('is cache-read tokens per output token', () => {
+    assert.equal(withTokens(900_000, 6_000).rereadPerOutput, 150);
+  });
+
+  it('reads null rather than infinity when nothing was written', () => {
+    assert.equal(withTokens(900_000, 0).rereadPerOutput, null);
+  });
+});
+
+describe('scorecard — quota-loss rows', () => {
+  const current = { from: '2026-08-10', to: '2026-08-16' };
+  const prior = { from: '2026-08-03', to: '2026-08-09' };
+  const stops = (n: number, range: DateRange) =>
+    summarizeWindow(output({ range, sessions: [session({ interactions: { rateLimits: n } })] }));
+  const named = (rows: HabitsScorecardRow[], measure: string) => rows.find((r) => r.measure === measure)!;
+
+  it('treats any usage-limit stop as a miss and a rise as worse', () => {
+    const row = named(scorecard(stops(2, current), stops(0, prior)), 'Usage-limit stops');
+    assert.equal(row.group, 'effectiveness');
+    assert.equal(row.verdict, 'worse');
+    assert.equal(row.goalMet, false);
+    assert.equal(named(scorecard(stops(0, current), stops(0, prior)), 'Usage-limit stops').goalMet, true);
+  });
+
+  it('no longer carries the rows that repeated another row', () => {
+    const measures = scorecard(stops(0, current), stops(0, prior)).map((r) => r.measure);
+    for (const gone of [
+      'Consumption per prompt',
+      'Sessions resumed cold after an idle gap',
+      'Share carried by sessions over 24 h',
+    ]) {
+      assert.ok(!measures.includes(gone), `${gone} should be gone`);
+    }
   });
 });
 
@@ -488,8 +583,13 @@ describe('parseWeekendDays', () => {
 // --- verdicts ---------------------------------------------------------------
 
 describe('scorecard', () => {
+  // One typed instruction per prompt, so consumption per instruction equals the old per-prompt rate.
   const withPerPrompt = (cost: number, prompts: number, range: DateRange) =>
-    summarizeWindow(output({ sessions: [session({ costUSD: cost, prompts })], range }));
+    summarizeWindow(
+      output({ sessions: [session({ costUSD: cost, prompts, interactions: { instructions: prompts } })], range }),
+    );
+  const costRow = (rows: HabitsScorecardRow[]) =>
+    rows.find((r) => r.measure === 'Consumption per typed instruction')!;
 
   const current = { from: '2026-08-10', to: '2026-08-16' };
   const prior = { from: '2026-08-03', to: '2026-08-09' };
@@ -503,6 +603,7 @@ describe('scorecard', () => {
       'Instructions that correct the last turn (share)',
       'Interrupts per 100 instructions',
       'Tool calls that errored (share)',
+      'Usage-limit stops',
     ]);
     assert.equal(rows[0].group, 'consumption');
   });
@@ -532,24 +633,23 @@ describe('scorecard', () => {
       withPerPrompt(98, 100, current),
       withPerPrompt(100, 100, prior),
     );
-    assert.equal(rows[0].measure, 'Consumption per prompt');
-    assert.equal(rows[0].verdict, 'flat');
+    assert.equal(costRow(rows).verdict, 'flat');
   });
 
   it('separates better from much better at 25%', () => {
     assert.equal(
-      scorecard(withPerPrompt(90, 100, current), withPerPrompt(100, 100, prior))[0].verdict,
+      costRow(scorecard(withPerPrompt(90, 100, current), withPerPrompt(100, 100, prior))).verdict,
       'better',
     );
     assert.equal(
-      scorecard(withPerPrompt(70, 100, current), withPerPrompt(100, 100, prior))[0].verdict,
+      costRow(scorecard(withPerPrompt(70, 100, current), withPerPrompt(100, 100, prior))).verdict,
       'much better',
     );
   });
 
   it('calls a rise worse', () => {
     assert.equal(
-      scorecard(withPerPrompt(130, 100, current), withPerPrompt(100, 100, prior))[0].verdict,
+      costRow(scorecard(withPerPrompt(130, 100, current), withPerPrompt(100, 100, prior))).verdict,
       'worse',
     );
   });
@@ -989,7 +1089,8 @@ describe('scorecard goals and explanations', () => {
   it('leaves goalMet null on rows whose target text says there is none', () => {
     const rs = rows({});
     for (const m of [
-      'Consumption per prompt',
+      'Long-session premium (cost per turn, 3 h+ vs under 1 h)',
+      'Old context re-read per output token',
       'Top-three session concentration',
       'Off-hours share (nights + weekends)',
       'Sessions with repeated same-file edits (share)',

@@ -146,6 +146,15 @@ function weekendLabel(days: readonly number[]): string {
 /** Relative move at or above which a row reads `much better` rather than `better`. */
 export const STRONG_MOVE = 0.25;
 
+/** A session this long or longer counts as long for the long-session premium. Matches the `long-running` flag. */
+export const LONG_SESSION_MINUTES = 180;
+
+/** A session shorter than this is the cheap baseline the long ones are measured against. */
+export const SHORT_SESSION_MINUTES = 60;
+
+/** Agent turns each side of the premium needs before the ratio means anything. */
+export const PREMIUM_MIN_TURNS = 30;
+
 const DURATION_BANDS: readonly [string, number, number][] = [
   ['under 1 h', 0, 60],
   ['1-3 h', 60, 180],
@@ -153,8 +162,6 @@ const DURATION_BANDS: readonly [string, number, number][] = [
   ['8-24 h', 480, 1440],
   ['over 24 h', 1440, Infinity],
 ];
-
-const OVER_24H_BAND = 'over 24 h';
 
 export interface HabitsOptions {
   /** What to call the cost figure. It is a quota proxy, never spend. */
@@ -304,7 +311,29 @@ export function summarizeEffectiveness(sessions: SessionSummary[], cost: number)
     correctionShare: per(total('corrections'), 1, 100),
     interruptRate: per(total('interrupts'), 1, 100),
     toolErrorShare: toolResults ? pct(total('toolErrors'), toolResults) : null,
+    usageLimitStops: total('rateLimits'),
   };
+}
+
+/**
+ * How much more one agent turn costs in a long session than in a short one.
+ *
+ * Every turn resends the whole conversation, so the same step gets dearer as a
+ * session ages. Reading it as a ratio of two rates keeps volume out of it: a window
+ * with more long sessions does not move it, only a steeper climb does.
+ *
+ * Duration is the in-window span, so a session cut by a window edge is classed by
+ * the part inside the window, the same part its cost and turns come from.
+ */
+export function longSessionPremium(sessions: SessionSummary[]): number | null {
+  const rate = (rows: SessionSummary[]) => {
+    const turns = rows.reduce((sum, s) => sum + (s.interactions?.requests ?? 0), 0);
+    const cost = rows.reduce((sum, s) => sum + s.costUSD, 0);
+    return turns >= PREMIUM_MIN_TURNS ? cost / turns : null;
+  };
+  const long = rate(sessions.filter((s) => s.durationMinutes >= LONG_SESSION_MINUTES));
+  const short = rate(sessions.filter((s) => s.durationMinutes < SHORT_SESSION_MINUTES));
+  return long !== null && short ? round(long / short, 2) : null;
 }
 
 /** Reduce one ccalyze run to the figures a habit comparison reads. */
@@ -423,6 +452,10 @@ export function summarizeWindow(output: CcalyzeOutput, options: HabitsOptions = 
       sessions.length,
     ),
     longRunningSessions: sessions.filter((s) => s.flags.includes('long-running')).length,
+    longSessionPremium: longSessionPremium(sessions),
+    rereadPerOutput: output.summary.totalOutputTokens
+      ? round(output.summary.totalCacheReadTokens / output.summary.totalOutputTokens, 0)
+      : null,
     effectiveness: summarizeEffectiveness(sessions, cost),
     top3Share: pct(top3, cost),
     offHoursShare: pct(offHoursCost, cost),
@@ -534,10 +567,6 @@ export function levers(current: HabitsWindow): HabitsLever[] {
   return out;
 }
 
-function over24hShare(window: HabitsWindow): number | null {
-  return window.byDuration.find((band) => band.band === OVER_24H_BAND)?.costShare ?? null;
-}
-
 /** No fixed target exists for this measure — say so instead of inventing a number. */
 const NO_TARGET = 'No fixed target — compare the trend across windows, not the level.';
 
@@ -601,9 +630,24 @@ export function scorecard(
   };
 
   return [
-    row('Consumption per prompt', (w) => w.perPrompt, unit, NO_TARGET, true, 'consumption', {
-      about: ABOUT.perPrompt,
-    }),
+    row(
+      'Long-session premium (cost per turn, 3 h+ vs under 1 h)',
+      (w) => w.longSessionPremium,
+      '×',
+      'No fixed target — 1× would mean a long session costs nothing extra per step. Watch whether the climb flattens.',
+      true,
+      'consumption',
+      { about: ABOUT.longPremium },
+    ),
+    row(
+      'Old context re-read per output token',
+      (w) => w.rereadPerOutput,
+      'per token',
+      'No fixed target — it rises with context size, so compare windows.',
+      true,
+      'consumption',
+      { about: ABOUT.reread },
+    ),
     row(
       'Cold-start premium, share of total',
       (w) => w.coldStart.share,
@@ -612,24 +656,6 @@ export function scorecard(
       true,
       'consumption',
       { goal: { op: 'atMost', value: 0 }, about: ABOUT.coldShare },
-    ),
-    row(
-      'Sessions resumed cold after an idle gap',
-      (w) => w.coldStart.sessions,
-      'sessions',
-      '0 sessions, for the same reason.',
-      true,
-      'consumption',
-      { goal: { op: 'atMost', value: 0 }, about: ABOUT.coldSessions },
-    ),
-    row(
-      'Share carried by sessions over 24 h',
-      over24hShare,
-      '%',
-      'No fixed target — high is fine if the work genuinely spans days.',
-      true,
-      'consumption',
-      { about: ABOUT.over24h },
     ),
     row(
       'Top-three session concentration',
@@ -753,6 +779,15 @@ export function scorecard(
       true,
       'effectiveness',
       { about: ABOUT.toolErrors },
+    ),
+    row(
+      'Usage-limit stops',
+      (w) => w.effectiveness?.usageLimitStops ?? null,
+      'stops',
+      '0 — each stop is work halted until the limit resets.',
+      true,
+      'effectiveness',
+      { goal: { op: 'atMost', value: 0 }, about: ABOUT.limitStops },
     ),
   ];
 }

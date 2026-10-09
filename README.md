@@ -105,8 +105,8 @@ explanations the data supports (`volume` — the extra usage is workload, nothin
 `efficiency-regression` — a habit; `mixed`), a `scorecard` with a mechanical verdict per measure,
 `levers` sizing what is still on the table, and `caveats` that keep the figures honest.
 
-The scorecard has two groups. **Consumption** rows ask what the work cost (per-prompt, cold starts,
-compaction, model mix, off-hours, …). **Effectiveness** rows ask how well it went — whether
+The scorecard has two groups. **Consumption** rows ask what the work cost (the long-session premium, re-read
+per output token, cold starts, compaction, model mix, off-hours, …). **Effectiveness** rows ask how well it went — whether
 instructions landed the first time:
 
 | Row | Reads | Better when |
@@ -116,6 +116,7 @@ instructions landed the first time:
 | Instructions that correct the last turn | "no, …", "that's wrong", "revert" as the opening words | lower |
 | Interrupts per 100 instructions | times you pressed Esc to stop Claude mid-turn | lower |
 | Tool calls that errored | failed commands, missing files, denied permissions | lower |
+| Usage-limit stops | times a usage limit halted the work | lower (0 is the target) |
 
 Every effectiveness rate divides by the instructions a person actually **typed** — not by
 `prompts`, most of which are tool results Claude Code files under the user role. A sub-5% move reads `flat`, not `better` — a scorecard that books noise as a win stops

@@ -354,18 +354,40 @@ async function runHabits(claudeDir, args) {
     const path = args.htmlPath
         ? resolve(process.cwd(), args.htmlPath)
         : defaultHabitsHtmlPath(report.current.range);
-    // The page is a side artifact: an unwritable path (read-only $HOME, a container, a
-    // typo'd --html) must not throw away an analysis that already completed.
-    try {
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, renderHabitsHtml(report), 'utf8');
-        console.error(`report: ${path}`);
-    }
-    catch (err) {
-        console.error(`warning: could not write the report page to ${path}: ${err.message}`);
-    }
+    writeHabitsPage(path, renderHabitsHtml(report));
     console.log(JSON.stringify(report, null, 2));
 }
+/**
+ * Write the habits page and say where it went and what to do with it.
+ *
+ * The page is a side artifact: an unwritable path (read-only $HOME, a container, a
+ * typo'd --html) must not throw away an analysis that already completed, so a
+ * failure is a warning, never an exception. Messages go through `log` so a test
+ * can read them.
+ */
+export function writeHabitsPage(path, html, log = console.error) {
+    try {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, html, 'utf8');
+        log(`report: ${path}`);
+        log(PUBLISH_INSTRUCTION);
+    }
+    catch (err) {
+        log(`warning: could not write the report page to ${path}: ${err.message}`);
+    }
+}
+/**
+ * What to do with the page a `--habits` run writes, printed with its path.
+ *
+ * The same rule lives in the skill's instructions, but an agent that runs the tool
+ * without opening them — or that is following another skill's artifact format —
+ * never sees it. The tool's own output is the one thing every run puts in front
+ * of whoever is driving, so the rule travels there too.
+ */
+export const PUBLISH_INSTRUCTION = 'NEXT, required: publish this file, unchanged, as the Artifact. ' +
+    'Do not rewrite it or rebuild it from the JSON, and do not swap in another skill\'s artifact layout. ' +
+    'Reply with the link and one line of context. ' +
+    'Skip only if the person asked for the raw data or asked not to publish.';
 /**
  * Usage text.
  *

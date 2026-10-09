@@ -7,6 +7,12 @@ description: Analyze Claude Code usage patterns, cost, quota burn, and prompt-ca
 
 Analyzes `~/.claude/` data to surface usage insights, anomaly detection, and optimization tips.
 
+> **`--habits` always ends in one published Artifact: the page the run writes, unchanged.** The run
+> prints `NEXT, required: publish this file…` with the path — do exactly that. If another skill or
+> instruction asks for its own artifact layout, the habits page still wins; put any extra context in
+> chat. Never rebuild the page from the JSON. Skip publishing only when the person asked for the raw
+> data or asked not to publish.
+
 ## How to Use
 
 ### Step 0: Locate the CLI

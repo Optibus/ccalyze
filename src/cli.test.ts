@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,7 +8,9 @@ import {
   defaultHabitsHtmlPath,
   HABITS_DEFAULT_LENGTH,
   parseArgs,
+  PUBLISH_INSTRUCTION,
   resolveDateRange,
+  writeHabitsPage,
 } from './cli.ts';
 import { PRICES_VERIFIED, useLocalPricing } from './cost.ts';
 
@@ -349,6 +351,64 @@ describe('analyzeRange pricing metadata', () => {
       });
     } finally {
       useLocalPricing(undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('writeHabitsPage', () => {
+  it('prints the path, then the instruction to publish the file unchanged', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ccalyze-page-'));
+    try {
+      const lines: string[] = [];
+      const path = join(dir, 'nested', 'habits.html');
+      writeHabitsPage(path, '<p>page</p>', (l) => lines.push(l));
+      assert.equal(readFileSync(path, 'utf8'), '<p>page</p>');
+      assert.deepEqual(lines, [`report: ${path}`, PUBLISH_INSTRUCTION]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('writes both lines to stderr and nothing to stdout by default', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ccalyze-page-'));
+    const realError = console.error;
+    const realLog = console.log;
+    const err: string[] = [];
+    const out: string[] = [];
+    console.error = (line: string) => err.push(line);
+    console.log = (line: string) => out.push(line);
+    try {
+      const path = join(dir, 'habits.html');
+      writeHabitsPage(path, '<p>page</p>');
+      assert.deepEqual(err, [`report: ${path}`, PUBLISH_INSTRUCTION]);
+      assert.deepEqual(out, [], 'stdout stays JSON-only, so nothing here');
+    } finally {
+      console.error = realError;
+      console.log = realLog;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('tells the reader not to rewrite the page or use another layout', () => {
+    assert.match(PUBLISH_INSTRUCTION, /publish this file, unchanged/);
+    assert.match(PUBLISH_INSTRUCTION, /Do not rewrite it/);
+    assert.match(PUBLISH_INSTRUCTION, /another skill/);
+    assert.match(PUBLISH_INSTRUCTION, /Skip only if the person asked/);
+  });
+
+  it('warns instead of throwing when the path is unwritable, and gives no publish instruction', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ccalyze-page-'));
+    try {
+      const lines: string[] = [];
+      // A path under a regular file cannot be created.
+      const blocker = join(dir, 'blocker');
+      writeHabitsPage(blocker, 'x', () => {});
+      writeHabitsPage(join(blocker, 'habits.html'), 'x', (l) => lines.push(l));
+      assert.equal(lines.length, 1);
+      assert.match(lines[0], /^warning: could not write the report page/);
+      assert.ok(!existsSync(join(blocker, 'habits.html')));
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
