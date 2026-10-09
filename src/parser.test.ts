@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { parseSessionFile, parseHistoryFile, classifyUserLine, CORRECTION_RE } from './parser.ts';
+import { parseSessionFile, parseHistoryFile, classifyUserLine, isRateLimitLine, CORRECTION_RE } from './parser.ts';
 
 const TMP = path.join(os.tmpdir(), 'ccalyze-test-' + Date.now());
 
@@ -275,6 +275,36 @@ describe('parseSessionFile — interactions', () => {
       { kind: 'interrupt', timestamp: '2026-03-29T10:02:00Z' },
       { kind: 'correction', timestamp: '2026-03-29T10:03:00Z' },
     ]);
+  });
+});
+
+describe('isRateLimitLine', () => {
+  const synthetic = (extra: Record<string, unknown>) => ({ type: 'assistant', ...extra });
+
+  it('reads a flagged rate_limit error line as a usage-limit stop', () => {
+    assert.ok(isRateLimitLine(synthetic({ isApiErrorMessage: true, error: 'rate_limit' })));
+  });
+
+  it('ignores other API errors and ordinary assistant lines', () => {
+    assert.ok(!isRateLimitLine(synthetic({ isApiErrorMessage: true, error: 'server_error' })));
+    assert.ok(!isRateLimitLine(synthetic({ isApiErrorMessage: true, error: 'authentication_failed' })));
+    assert.ok(!isRateLimitLine(synthetic({ error: 'rate_limit' })), 'needs the API-error flag');
+    assert.ok(!isRateLimitLine({ type: 'user', isApiErrorMessage: true, error: 'rate_limit' }));
+  });
+
+  it('records the stop as an interaction without turning it into a message', async () => {
+    const file = path.join(TMP, 'ratelimit.jsonl');
+    const lines = [
+      { type: 'user', timestamp: '2026-03-29T10:00:00Z', message: { content: 'keep going' } },
+      {
+        type: 'assistant', timestamp: '2026-03-29T10:01:00Z', isApiErrorMessage: true, error: 'rate_limit',
+        message: { model: '<synthetic>', usage: { input_tokens: 0, output_tokens: 0 }, content: [{ type: 'text', text: "You've hit your limit" }] },
+      },
+    ];
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n'));
+    const result = await parseSessionFile(file);
+    assert.deepEqual(result.interactions!.map((i) => i.kind), ['instruction', 'rate-limit']);
+    assert.equal(result.messages.length, 0);
   });
 });
 

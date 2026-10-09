@@ -80,6 +80,7 @@ function session(spec: SessionSpec = {}): SessionSummary {
       toolResults: 0,
       toolErrors: 0,
       requests: 0,
+      rateLimits: 0,
       ...spec.interactions,
     },
   };

@@ -97,6 +97,16 @@ export function classifyUserLine(obj: any): Interaction['kind'][] {
   return [CORRECTION_RE.test(text) ? 'correction' : 'instruction'];
 }
 
+/**
+ * Whether an assistant line is Claude Code reporting that a usage limit stopped
+ * the work. These are synthetic lines (`model: "<synthetic>"`, zero tokens) flagged
+ * `isApiErrorMessage` with `error: "rate_limit"`; they carry no cost, so they never
+ * reach the message list and must be counted here instead.
+ */
+export function isRateLimitLine(obj: any): boolean {
+  return obj.type === 'assistant' && obj.isApiErrorMessage === true && obj.error === 'rate_limit';
+}
+
 export interface SessionParseResult {
   sessionId: string;
   startTime: string;
@@ -167,6 +177,8 @@ export async function parseSessionFile(filePath: string): Promise<SessionParseRe
         interactions.push({ kind, timestamp: ts ?? '' });
       }
     }
+
+    if (isRateLimitLine(obj)) interactions.push({ kind: 'rate-limit', timestamp: ts ?? '' });
 
     // Extract usage from assistant messages
     if (obj.type !== 'assistant') continue;

@@ -243,7 +243,7 @@ describe('aggregate — rework', () => {
       ],
     }], [], range);
     assert.deepEqual(result.sessions[0].interactions, {
-      instructions: 2, corrections: 1, interrupts: 1, toolResults: 3, toolErrors: 1, requests: 3,
+      instructions: 2, corrections: 1, interrupts: 1, toolResults: 3, toolErrors: 1, requests: 3, rateLimits: 0,
     });
   });
 
@@ -253,7 +253,7 @@ describe('aggregate — rework', () => {
       transcriptSizeMB: 1, promptCount: 1, messages: [msg('r1', [])],
     }], [], range);
     assert.deepEqual(result.sessions[0].interactions, {
-      instructions: 0, corrections: 0, interrupts: 0, toolResults: 0, toolErrors: 0, requests: 1,
+      instructions: 0, corrections: 0, interrupts: 0, toolResults: 0, toolErrors: 0, requests: 1, rateLimits: 0,
     });
   });
 });
@@ -293,7 +293,7 @@ describe('buildDeepData', () => {
       compaction: 'none',
       autoCompactions: 0,
       reworkEdits: 0,
-      interactions: { instructions: 0, corrections: 0, interrupts: 0, toolResults: 0, toolErrors: 0, requests: 0 },
+      interactions: { instructions: 0, corrections: 0, interrupts: 0, toolResults: 0, toolErrors: 0, requests: 0, rateLimits: 0 },
       ...over,
     };
   }

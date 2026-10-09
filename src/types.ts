@@ -186,12 +186,18 @@ export interface InteractionCounts {
   toolErrors: number;
   /** Deduplicated API requests — the agent turns those instructions set off, subagents included. */
   requests: number;
+  /**
+   * Times Claude Code stopped with a usage-limit message (`error: "rate_limit"` on a
+   * synthetic assistant line) — the five-hour window or the weekly cap ran out and
+   * work halted. The one place quota loss shows up as lost time, not just a number.
+   */
+  rateLimits: number;
 }
 
 /** One classified `type:"user"` event, kept per event so a date filter can apply to it. */
 export interface Interaction {
   timestamp: string;
-  kind: 'instruction' | 'correction' | 'interrupt' | 'tool-ok' | 'tool-error';
+  kind: 'instruction' | 'correction' | 'interrupt' | 'tool-ok' | 'tool-error' | 'rate-limit';
 }
 
 export interface CcalyzeOutput {
